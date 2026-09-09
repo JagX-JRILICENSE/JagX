@@ -49,7 +49,10 @@ Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-lb build
+# live-build requires root for chroot/bootstrap operations.
+# GitHub-hosted runners execute the workflow user as non-root, so use sudo.
+sudo lb build
 mkdir -p "${ROOT}/dist"
-cp live-image-amd64.hybrid.iso "${ROOT}/dist/JagX-OS-amd64.iso"
+sudo cp live-image-amd64.hybrid.iso "${ROOT}/dist/JagX-OS-amd64.iso"
+sudo chown "$(id -u):$(id -g)" "${ROOT}/dist/JagX-OS-amd64.iso"
 echo "Built ${ROOT}/dist/JagX-OS-amd64.iso"
