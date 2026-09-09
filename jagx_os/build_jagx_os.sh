@@ -10,10 +10,16 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD"
 cd "$BUILD"
 
+# Explicit Debian mirrors are required because GitHub's Ubuntu runner can
+# otherwise cause live-build to inherit Ubuntu's mirror configuration while
+# the requested distribution is Debian bookworm.
 lb config \
   --distribution bookworm \
   --architectures amd64 \
   --archive-areas "main contrib non-free-firmware" \
+  --mirror-bootstrap "http://deb.debian.org/debian/" \
+  --mirror-binary "http://deb.debian.org/debian/" \
+  --mirror-binary-security "http://security.debian.org/debian-security/" \
   --debian-installer false \
   --binary-images iso-hybrid \
   --bootappend-live "boot=live components quiet splash"
@@ -50,7 +56,6 @@ X-GNOME-Autostart-enabled=true
 EOF
 
 # live-build requires root for chroot/bootstrap operations.
-# GitHub-hosted runners execute the workflow user as non-root, so use sudo.
 sudo lb build
 mkdir -p "${ROOT}/dist"
 sudo cp live-image-amd64.hybrid.iso "${ROOT}/dist/JagX-OS-amd64.iso"
