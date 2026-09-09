@@ -4,8 +4,7 @@
 
 > "Call JagX... and it answers."
 
-JagX is a local-first personal AI agent designed for **you**.  
-It runs on your machine, has deep system access, can search the internet, control your desktop, protect your privacy, and remember you.
+JagX is a local-first personal AI agent. It listens for its name, understands what you say, acts on your computer, searches the internet when needed, and speaks back.
 
 **Branding**: JagX  
 **License Tag**: JRILICENSE
@@ -14,100 +13,92 @@ It runs on your machine, has deep system access, can search the internet, contro
 
 ## ⚠️ Critical Warning
 
-JagX has powerful system privileges:
-
-- Full file system access (read / write / **delete**)
-- Shell command execution
-- Mouse & keyboard control
-- Application uninstall
-- Camera / microphone monitoring and blocking attempts
-- Internet access (when your laptop or hotspot is online)
-
-**Only run this on a machine you fully own and trust.**
+JagX has powerful system privileges (files, shell, mouse, keyboard, uninstall, camera monitoring).  
+Only run it on a machine you fully own and trust.
 
 ---
 
-## Current Capabilities
+## Voice Pipeline (Fully Working)
 
-### Core Intelligence
-- Local LLM via Ollama (or any OpenAI-compatible API)
-- Full multi-step tool-calling agent
+1. JagX continuously listens through your microphone.
+2. When you say **"JagX"**, it wakes up.
+3. You speak your command.
+4. It transcribes your speech (local Whisper).
+5. The agent understands and executes (tools, internet, system control...).
+6. It speaks the answer back to you.
 
-### Internet
-- Web search
-- Fetch any webpage content  
-(Works automatically when your laptop/hotspot has internet)
-
-### Local System Control
-- List / read / write files
-- **Easy delete** of files and folders (`delete_path`)
-- **Easy uninstall** of apps (`uninstall_app`)
-- Run any shell command
-- System information
-
-### Desktop Control
-- Move mouse, click, type text, press keys
-- Take screenshots
-
-### Privacy Guard
-- Detect processes using camera / microphone
-- List audio/video devices
-- Kill suspicious processes
-- Attempt to block camera access
-
-### Safety (Smart Confirmation)
-- **Does NOT** ask for confirmation on normal actions
-- **Only** asks when the action looks related to hacking tools or extremely destructive commands
-
-### Memory
-- Persistent personal memory (facts, preferences, notes)
-- Automatically remembers things you tell it to remember
-
-### Voice (Foundation)
-- High-quality TTS (edge-tts)
-- Local STT (faster-whisper)
-- Full wake-word pipeline still in progress
+You can also run pure text mode if you prefer.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Install Ollama and a model
+# 1. Install Ollama + a model
 ollama pull llama3.1
 
-# 2. Clone & install
+# 2. Install dependencies
 git clone https://github.com/JagX-JRILICENSE/JagX.git
 cd JagX
 pip install -r requirements.txt
 
-# 3. Run
+# 3. Run in Voice mode (default)
 python main.py
+
+# Or text-only mode
+python main.py --mode text
 ```
+
+**First run tips**
+- Allow microphone access when your OS asks.
+- Speak clearly after saying "JagX".
+- For better accuracy change `stt_model` to `small` or `medium` in `config/settings.yaml` (slower but smarter).
 
 ---
 
-## Roadmap Status
+## What JagX Can Do Right Now
 
-1. [x] Create repository & branding
-2. [x] Basic project structure
-3. [x] Local LLM + tool calling
-4. [x] Core tools (files, shell, internet)
-5. [x] Easy delete + uninstall
-6. [x] Mouse & keyboard control
-7. [x] Privacy guard (camera/mic detection & block)
-8. [x] Selective safety (only confirm high-risk/hacking actions)
-9. [x] Personal memory system
-10. [ ] Full voice pipeline (wake word "JagX" → listen → act → speak)
-11. [ ] System tray + always-on mode
-12. [ ] Installer
+| Feature                    | Status     |
+|---------------------------|------------|
+| Continuous voice listening | ✅ Working |
+| Wake word "JagX"           | ✅ Working |
+| Speech-to-Text (local)     | ✅ Working |
+| Text-to-Speech             | ✅ Working |
+| Local LLM + tool calling   | ✅ Working |
+| Internet search            | ✅ Working |
+| File read/write/delete     | ✅ Working |
+| App uninstall              | ✅ Working |
+| Mouse & keyboard control   | ✅ Working |
+| Camera / mic privacy scan  | ✅ Working |
+| Personal memory            | ✅ Working |
+| Smart safety (high-risk only) | ✅ Working |
+
+---
+
+## Example Voice Commands
+
+- "JagX, what's the weather in Lagos?"
+- "JagX, list the files on my Desktop"
+- "JagX, delete the folder called old-stuff"
+- "JagX, check if anything is using my camera"
+- "JagX, open notepad and type hello"
+- "JagX, remember that I like short answers"
+
+---
+
+## Requirements
+
+- Python 3.11+
+- Working microphone + speakers
+- Ollama running locally (recommended)
+- `pip install -r requirements.txt`
 
 ---
 
 ## License
 
 **JRILICENSE**  
-Custom personal license. All rights reserved to the owner (JagX-JRILICENSE).
+Personal use only. All rights reserved to JagX-JRILICENSE.
 
 ---
 
