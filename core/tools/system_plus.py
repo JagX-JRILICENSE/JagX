@@ -1,4 +1,4 @@
-"""Fifty lightweight, free, local Windows utility capabilities for JagX."""
+"""Fifty lightweight local Windows utility capabilities for JagX."""
 from __future__ import annotations
 import os, platform, shutil, socket, subprocess, time
 from pathlib import Path
@@ -6,17 +6,17 @@ from pathlib import Path
 def _run(cmd):
     try: return subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT, timeout=15).strip()
     except Exception as e: return f"Unavailable: {e}"
-
 def system_info(): return f"{platform.system()} {platform.release()} ({platform.version()}); machine={platform.machine()}; processor={platform.processor()}"
 def hostname(): return socket.gethostname()
-def current_user(): return os.getlogin() if hasattr(os,"getlogin") else os.getenv("USERNAME") or os.getenv("USER") or "unknown"
+def current_user():
+    try: return os.getlogin()
+    except Exception: return os.getenv("USERNAME") or os.getenv("USER") or "unknown"
 def working_directory(): return str(Path.cwd())
 def home_directory(): return str(Path.home())
 def current_time(): return time.strftime("%Y-%m-%d %H:%M:%S")
-def uptime():
-    try: return f"{time.time()-float(open('/proc/uptime').read().split()[0]):.0f}s" if Path('/proc/uptime').exists() else "Windows uptime available through system tools."
-    except Exception:return "Unavailable"
-def disk_usage(path="C:\\" if platform.system()=="Windows" else "/"):
+def uptime(): return _run(["powershell","-NoProfile","-Command","(Get-CimInstance Win32_OperatingSystem).LastBootUpTime"])
+def disk_usage(path=None):
+    path = path or ("C:\\" if platform.system()=="Windows" else "/")
     try:
         d=shutil.disk_usage(path); return f"{path}: {d.used/2**30:.1f} GB used / {d.total/2**30:.1f} GB total ({d.free/2**30:.1f} GB free)"
     except Exception as e:return f"Disk info failed: {e}"
@@ -54,7 +54,7 @@ def pictures_directory(): return str(Path.home()/"Pictures")
 def videos_directory(): return str(Path.home()/"Videos")
 def music_directory(): return str(Path.home()/"Music")
 def open_folder(path):
-    p=str(Path(path).expanduser());
+    p=str(Path(path).expanduser())
     if platform.system()=="Windows": os.startfile(p)
     return f"Opened folder: {p}"
 def open_control_panel():
@@ -108,7 +108,6 @@ def _defs():
     specs=[
 ("system_info","Get Windows/system information",system_info,{}),("hostname","Get computer hostname",hostname,{}),("current_user","Get current local username",current_user,{}),("working_directory","Get JagX working directory",working_directory,{}),("home_directory","Get user home directory",home_directory,{}),("current_time","Get local computer time",current_time,{}),("uptime","Get system uptime",uptime,{}),("disk_usage","Get disk usage for a path",disk_usage,{"path":{"type":"string"}}),("path_exists","Check whether a path exists",path_exists,{"path":{"type":"string"}}),("file_size","Get file size",file_size,{"path":{"type":"string"}}),("list_drives","List filesystem drives",list_drives,{}),("wifi_status","Show Wi-Fi interface status",wifi_status,{}),("ip_addresses","Show local IPv4 addresses",ip_addresses,{}),("network_adapters","Show network adapter status",network_adapters,{}),("ping_host","Ping a host",ping_host,{"host":{"type":"string"}}),("dns_lookup","Resolve a hostname",dns_lookup,{"host":{"type":"string"}}),("battery_status","Show battery status",battery_status,{}),("display_resolution","Show display resolution",display_resolution,{}),("gpu_info","Show graphics adapter information",gpu_info,{}),("cpu_info","Show CPU information",cpu_info,{}),("ram_info","Show installed RAM information",ram_info,{}),("os_info","Show Windows OS information",os_info,{}),("process_count","Count running processes",process_count,{}),("top_processes","Show top processes by CPU",top_processes,{}),("services_summary","Summarize Windows services",services_summary,{}),("firewall_status","Show Windows firewall profile status",firewall_status,{}),("windows_version","Show Windows version",windows_version,{}),("environment_value","Read a non-secret environment variable",environment_value,{"name":{"type":"string"}}),("python_version","Show Python version",python_version,{}),("jagx_version","Show JagX version",jagx_version,{}),("temp_directory","Get Windows temp directory",temp_directory,{}),("desktop_directory","Get Desktop directory",desktop_directory,{}),("downloads_directory","Get Downloads directory",downloads_directory,{}),("documents_directory","Get Documents directory",documents_directory,{}),("pictures_directory","Get Pictures directory",pictures_directory,{}),("videos_directory","Get Videos directory",videos_directory,{}),("music_directory","Get Music directory",music_directory,{}),("open_folder","Open a folder in Explorer",open_folder,{"path":{"type":"string"}}),("open_control_panel","Open Control Panel",open_control_panel,{}),("open_task_manager","Open Task Manager",open_task_manager,{}),("open_settings","Open Windows Settings",open_settings,{}),("open_run_dialog","Open Windows Run dialog",open_run_dialog,{}),("lock_workstation","Lock the workstation",lock_workstation,{}),("empty_recycle_bin","Empty the Windows Recycle Bin",empty_recycle_bin,{}),("copy_text_to_clipboard","Copy text to clipboard",copy_text_to_clipboard,{"text":{"type":"string"}}),("get_clipboard_text","Read clipboard text",get_clipboard_text,{}),("mouse_position","Get current cursor position",mouse_position,{}),("screen_size","Get screen dimensions",screen_size,{}),("scroll_mouse","Scroll the mouse wheel",scroll_mouse,{"clicks":{"type":"integer","default":3}}),("double_click","Double-click at a screen position",double_click,{"x":{"type":"integer"},"y":{"type":"integer"}}),("drag_mouse","Drag the cursor to a screen position",drag_mouse,{"x":{"type":"integer"},"y":{"type":"integer"},"duration":{"type":"number","default":0.5}})]
     defs=[]
-    for name,desc,fn,props in specs:
-        defs.append({"type":"function","function":{"name":name,"description":desc,"parameters":{"type":"object","properties":props,"required":[k for k,v in props.items() if "default" not in v]}}})
+    for name,desc,fn,props in specs: defs.append({"type":"function","function":{"name":name,"description":desc,"parameters":{"type":"object","properties":props,"required":[k for k,v in props.items() if "default" not in v]}}})
     return defs,{name:fn for name,_,fn,_ in specs}
 SYSTEM_PLUS_TOOLS,TOOL_FUNCTIONS=_defs()
