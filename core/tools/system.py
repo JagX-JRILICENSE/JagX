@@ -1,8 +1,7 @@
 """
 JagX Local System Tools
 Gives the agent real access to the laptop filesystem and shell.
-
-WARNING: These tools are powerful. Use confirmation mode in production.
+Easy delete and uninstall helpers included.
 
 JRILICENSE
 """
@@ -11,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import platform
 from pathlib import Path
@@ -66,6 +66,83 @@ def write_file(path: str, content: str) -> str:
         return f"Successfully wrote {len(content)} characters to {p}"
     except Exception as e:
         return f"Error writing file: {e}"
+
+
+def delete_path(path: str, recursive: bool = False) -> str:
+    """
+    Delete a file or folder easily.
+    Set recursive=True to delete folders and everything inside.
+    """
+    try:
+        p = Path(path).expanduser().resolve()
+        if not p.exists():
+            return f"Path does not exist: {p}"
+
+        if p.is_file() or p.is_symlink():
+            p.unlink()
+            return f"Deleted file: {p}"
+        elif p.is_dir():
+            if recursive:
+                shutil.rmtree(p)
+                return f"Deleted folder and all contents: {p}"
+            else:
+                # Only delete if empty
+                p.rmdir()
+                return f"Deleted empty folder: {p}"
+        else:
+            return f"Unknown path type: {p}"
+    except Exception as e:
+        return f"Delete failed: {e}"
+
+
+def uninstall_app(app_name: str) -> str:
+    """
+    Attempt to uninstall an application by name.
+    Works best on Windows (winget/choco) and Linux (apt/dnf/pacman).
+    On macOS it tries common methods.
+    """
+    system = platform.system().lower()
+    try:
+        if system == "windows":
+            # Prefer winget
+            result = subprocess.run(
+                ["winget", "uninstall", "--name", app_name, "--accept-source-agreements"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                return f"Uninstalled via winget: {app_name}\n{result.stdout}"
+            # Fallback to chocolatey if available
+            result2 = subprocess.run(
+                ["choco", "uninstall", app_name, "-y"],
+                capture_output=True, text=True, timeout=120
+            )
+            return f"Winget result: {result.stdout or result.stderr}\nChoco result: {result2.stdout or result2.stderr}"
+
+        elif system == "darwin":
+            # Try brew if it's a brew package
+            result = subprocess.run(
+                ["brew", "uninstall", app_name],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                return f"Uninstalled via Homebrew: {app_name}"
+            return f"Homebrew attempt: {result.stderr or result.stdout}\nOn macOS you may need to drag the app to Trash or use System Settings."
+
+        else:  # Linux
+            # Try common package managers
+            for cmd in [
+                ["sudo", "apt", "remove", "-y", app_name],
+                ["sudo", "dnf", "remove", "-y", app_name],
+                ["sudo", "pacman", "-R", "--noconfirm", app_name],
+                ["sudo", "snap", "remove", app_name],
+            ]:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+                if result.returncode == 0:
+                    return f"Uninstalled with {' '.join(cmd)}: {app_name}\n{result.stdout}"
+            return "Tried apt/dnf/pacman/snap. None succeeded. Try run_shell with the correct command."
+
+    except Exception as e:
+        return f"Uninstall failed: {e}"
 
 
 def run_shell(command: str, timeout: int = 60) -> str:
@@ -158,6 +235,35 @@ SYSTEM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "delete_path",
+            "description": "Easily delete a file or folder. Use recursive=True to delete a folder and everything inside it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file or folder to delete"},
+                    "recursive": {"type": "boolean", "description": "Delete folder contents too", "default": False}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "uninstall_app",
+            "description": "Uninstall an application by name. Works with winget/choco (Windows), brew (macOS), apt/dnf/pacman/snap (Linux).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app_name": {"type": "string", "description": "Name of the application to uninstall"}
+                },
+                "required": ["app_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_shell",
             "description": "Run a shell/terminal command on the local laptop. Very powerful. Use for installing packages, system updates, launching apps, etc.",
             "parameters": {
@@ -188,6 +294,8 @@ TOOL_FUNCTIONS = {
     "list_directory": list_directory,
     "read_file": read_file,
     "write_file": write_file,
+    "delete_path": delete_path,
+    "uninstall_app": uninstall_app,
     "run_shell": run_shell,
     "get_system_info": get_system_info,
 }
