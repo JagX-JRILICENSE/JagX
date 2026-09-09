@@ -1,7 +1,7 @@
 """
 JagX Agent - The brain of the jaguar.
 Full tool-calling agent with internet, local system, desktop control,
-privacy guard, easy delete/uninstall, and personal memory.
+privacy guard, easy delete/uninstall, clipboard, notifications, and personal memory.
 
 Safety: Only asks for confirmation on high-risk / hacking-related actions.
 
@@ -26,6 +26,7 @@ from core.tools.web import WEB_TOOLS, TOOL_FUNCTIONS as WEB_FUNCS
 from core.tools.system import SYSTEM_TOOLS, TOOL_FUNCTIONS as SYSTEM_FUNCS
 from core.tools.desktop import DESKTOP_TOOLS, TOOL_FUNCTIONS as DESKTOP_FUNCS
 from core.tools.privacy import PRIVACY_TOOLS, TOOL_FUNCTIONS as PRIVACY_FUNCS
+from core.tools.extra import EXTRA_TOOLS, TOOL_FUNCTIONS as EXTRA_FUNCS
 
 console = Console()
 
@@ -40,9 +41,7 @@ HIGH_RISK_PATTERNS = [
 ]
 
 class JagXAgent:
-    """
-    Main agent loop for JagX.
-    """
+    """Main agent loop for JagX."""
 
     def __init__(self, config_path: str = "config/settings.yaml"):
         self.config = self._load_config(config_path)
@@ -62,8 +61,11 @@ class JagXAgent:
             **SYSTEM_FUNCS,
             **DESKTOP_FUNCS,
             **PRIVACY_FUNCS,
+            **EXTRA_FUNCS,
         }
-        self.tool_definitions = WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS
+        self.tool_definitions = (
+            WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS
+        )
 
         console.print("[bold orange1]JagX Agent initialized[/bold orange1]")
         console.print(f"[dim]LLM: {self.llm.provider} / {self.llm.model}[/dim]")
@@ -78,28 +80,21 @@ class JagXAgent:
             return {}
 
     def _is_high_risk(self, tool_name: str, arguments: Dict[str, Any]) -> bool:
-        """Return True only if the action looks hacking-related or extremely destructive."""
         text_to_check = tool_name + " " + json.dumps(arguments).lower()
-
         for pattern in HIGH_RISK_PATTERNS:
             if re.search(pattern, text_to_check, re.IGNORECASE):
                 return True
-
-        # Extra check for run_shell
         if tool_name == "run_shell":
             cmd = arguments.get("command", "").lower()
             if any(re.search(p, cmd, re.IGNORECASE) for p in HIGH_RISK_PATTERNS):
                 return True
-
         return False
 
     def _execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Run a tool, with selective confirmation only for high-risk actions."""
         func = self.tool_functions.get(name)
         if not func:
             return f"Unknown tool: {name}"
 
-        # Selective safety
         if self._is_high_risk(name, arguments):
             console.print(f"[bold red]HIGH RISK ACTION DETECTED[/bold red]: {name}({arguments})")
             if not Confirm.ask("This looks related to hacking or highly destructive. Proceed?", default=False):
@@ -116,7 +111,6 @@ class JagXAgent:
             return f"Tool execution error: {e}"
 
     def think(self, user_input: str) -> str:
-        """Full agent loop with tool calling."""
         self.messages.append({"role": "user", "content": user_input})
 
         max_rounds = 10
@@ -152,7 +146,6 @@ class JagXAgent:
             content = response.get("content") or ""
             self.messages.append({"role": "assistant", "content": content})
 
-            # Auto-save interesting things to memory (simple heuristic)
             if any(word in user_input.lower() for word in ["remember", "my name is", "i like", "i prefer", "note that"]):
                 self.memory.add_note(user_input)
 
@@ -161,11 +154,9 @@ class JagXAgent:
         return "I reached the maximum number of tool rounds. Please try a simpler request."
 
     def run(self):
-        """Main interactive loop (text for now — voice coming next)."""
+        """Text interactive loop."""
         self.running = True
         console.print("[green]JagX is now awake and listening...[/green]")
-        console.print("[dim]Internet + full laptop control + privacy guard active.[/dim]")
-        console.print("[dim]Confirmation only required for high-risk / hacking-related actions.[/dim]")
         console.print("[dim]Type your request or 'exit' to sleep.[/dim]\n")
 
         while self.running:
