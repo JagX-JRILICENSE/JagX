@@ -27,9 +27,11 @@ from core.tools.idle import IDLE_TOOL_DEFINITIONS,TOOL_FUNCTIONS as IDLE_FUNCS
 from core.tools.system_plus import SYSTEM_PLUS_TOOLS,TOOL_FUNCTIONS as SYSTEM_PLUS_FUNCS
 from core.tools.system_plus2 import SYSTEM_PLUS2_TOOLS,TOOL_FUNCTIONS as SYSTEM_PLUS2_FUNCS
 from core.tools.social_assistant import SYSTEM_SOCIAL_TOOLS,TOOL_FUNCTIONS as SOCIAL_FUNCS
+
 console=Console()
 HIGH_RISK_PATTERNS=[r"hack",r"exploit",r"payload",r"metasploit",r"nmap",r"sqlmap",r"keylog",r"rat\b",r"backdoor",r"rootkit",r"c2\b",r"reverse.?shell",r"bind.?shell",r"privilege.?escalation",r"mimikatz",r"credential.?dump",r"password.?crack",r"ddos",r"botnet",r"ransomware",r"format\s+c:",r"rm\s+-rf\s+/",r"mkfs",r"dd\s+if="]
-SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch","close_application","copy_path","move_path","create_folder","browser_download","shutdown_windows","restart_windows","sleep_windows","hibernate_windows","set_idle_policy","lock_workstation","empty_recycle_bin","open_run_dialog","copy_text_to_clipboard","drag_mouse","double_click","scroll_mouse","close_active_window","clear_temp_files","set_file_permissions","prepend_text_file","append_text_file","make_empty_file","zip_path","unzip_path","copy_file_path","toggle_windows_theme","launch_task_scheduler","launch_services","launch_device_manager","launch_disk_management","launch_event_viewer","move_cursor_to","click_cursor","configure_communication","set_social_schedule","queue_social_post","set_auto_reply","prepare_reply","call_control"}
+SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","get_credential","delete_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch","close_application","copy_path","move_path","create_folder","browser_download","shutdown_windows","restart_windows","sleep_windows","hibernate_windows","set_idle_policy","lock_workstation","empty_recycle_bin","open_run_dialog","copy_text_to_clipboard","drag_mouse","double_click","scroll_mouse","close_active_window","clear_temp_files","set_file_permissions","prepend_text_file","append_text_file","make_empty_file","zip_path","unzip_path","copy_file_path","toggle_windows_theme","launch_task_scheduler","launch_services","launch_device_manager","launch_disk_management","launch_event_viewer","move_cursor_to","click_cursor","configure_communication","set_social_schedule","queue_social_post","set_auto_reply","prepare_reply","call_control"}
+
 class JagXAgent:
     def __init__(self,config_path="config/settings.yaml"):
         self.config=self._load_config(config_path); self.llm=create_llm_from_config(self.config); self.memory=Memory(self.config.get("memory",{}).get("path","./data/memory")); self.messages=[]; self.running=False
@@ -39,21 +41,42 @@ class JagXAgent:
         memory_tools=[{"type":"function","function":{"name":"memory_search","description":"Search JagX's local long-term memory for relevant facts, preferences, notes, or past conversation context.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":8}},"required":["query"]}}},{"type":"function","function":{"name":"memory_forget","description":"Forget matching memories from local long-term memory. Use when the user asks JagX to forget something.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}]
         self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS+BROWSER_TOOLS+SCREEN_TOOLS+IMAGE_TOOLS+POWER_TOOL_DEFINITIONS+IDLE_TOOL_DEFINITIONS+SYSTEM_PLUS_TOOLS+SYSTEM_PLUS2_TOOLS+SYSTEM_SOCIAL_TOOLS+memory_tools
         console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded — model: {self.llm.model}")
+
     def _load_config(self,path):
         try:
             with open(path,encoding="utf-8") as f:return yaml.safe_load(f) or {}
         except Exception:return {}
+
+    def _safe_arguments_for_log(self,arguments):
+        """Never print password/secret values to the terminal confirmation prompt."""
+        safe=dict(arguments)
+        for key in list(safe):
+            if any(word in key.lower() for word in ("password","secret","token","api_key","credential")):
+                safe[key]="[REDACTED]"
+        return safe
+
     def _needs_confirmation(self,name,arguments):
         text=(name+" "+json.dumps(arguments)).lower(); return name in SENSITIVE_TOOLS or name=="memory_forget" or any(re.search(p,text,re.I) for p in HIGH_RISK_PATTERNS)
+
     def _execute_tool(self,name,arguments):
         func=self.tool_functions.get(name)
         if not func:return f"Unknown tool: {name}"
         if self._needs_confirmation(name,arguments):
-            console.print(f"[bold yellow]JagX wants to perform:[/bold yellow] {name}({arguments})")
+            console.print(f"[bold yellow]JagX wants to perform:[/bold yellow] {name}({self._safe_arguments_for_log(arguments)})")
             if not Confirm.ask("Allow this action?",default=False):return "Action cancelled by user."
         try:return str(func(**arguments))
         except TypeError as e:return f"Tool argument error: {e}"
         except Exception as e:return f"Tool execution error: {e}"
+
+    def _sanitize_secret_result(self,name,result):
+        """Strip secrets from every credential tool result before LLM/context storage."""
+        if name in {"request_password","get_credential","save_credential"}:
+            if result.startswith("SECURE_CREDENTIAL:"):
+                return "CREDENTIAL_RETRIEVED_SECURELY: secret is available only to the local tool flow and must never be displayed or stored in conversation memory."
+            if name=="request_password" and not result.startswith("PASSWORD_INPUT_ERROR"):
+                return "PASSWORD_RECEIVED_SECURELY: secret is available only to the local tool flow and must not be repeated or stored in conversation memory."
+        return result
+
     def think(self,user_input):
         self.messages.append({"role":"user","content":user_input})
         for _ in range(16):
@@ -65,7 +88,7 @@ class JagXAgent:
                     try:args=json.loads(fn.get("arguments","{}"))
                     except json.JSONDecodeError:args={}
                     result=self._execute_tool(name,args)
-                    if name=="request_password" and not result.startswith("PASSWORD_INPUT_ERROR"):result="PASSWORD_RECEIVED_SECURELY: the password is available only to the local tool flow and must not be repeated or stored in conversation memory."
+                    result=self._sanitize_secret_result(name,result)
                     self.messages.append({"role":"tool","tool_call_id":call.get("id",name),"name":name,"content":result})
                 continue
             content=response.get("content") or ""; self.messages.append({"role":"assistant","content":content})
@@ -74,6 +97,7 @@ class JagXAgent:
             self.memory.record_conversation(user_input,content)
             return content
         return "I reached the maximum number of tool rounds. Please try a simpler request."
+
     def run(self):
         self.running=True; console.print("[green]JagX is awake. Type your request or 'exit'.[/green]")
         while self.running:
