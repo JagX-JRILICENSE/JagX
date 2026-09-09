@@ -103,5 +103,5 @@ class JagXAgent:
                 if text.lower() in {"exit","quit","stop","sleep"}:break
                 console.print("[bold orange1]JagX:[/bold orange1]");console.print(Markdown(self.think(text)))
             except KeyboardInterrupt:break
-            except Exception as e:console.print(f"[red]Error:[/red] {e")
+            except Exception as e:console.print(f"[red]Error:[/red] {e}")
         self.running=False
