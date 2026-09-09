@@ -1,45 +1,44 @@
 """JagX Agent - the brain of the jaguar."""
 from __future__ import annotations
-import json, re
-from typing import Any, Dict, List
+import json,re
+from typing import Any,Dict,List
 import yaml
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.prompt import Confirm
 from core.llm import create_llm_from_config
 from core.memory import Memory
-from core.tools.web import WEB_TOOLS, TOOL_FUNCTIONS as WEB_FUNCS
-from core.tools.system import SYSTEM_TOOLS, TOOL_FUNCTIONS as SYSTEM_FUNCS
-from core.tools.desktop import DESKTOP_TOOLS, TOOL_FUNCTIONS as DESKTOP_FUNCS
-from core.tools.privacy import PRIVACY_TOOLS, TOOL_FUNCTIONS as PRIVACY_FUNCS
-from core.tools.extra import EXTRA_TOOLS, TOOL_FUNCTIONS as EXTRA_FUNCS
-from core.tools.media import MEDIA_TOOLS, TOOL_FUNCTIONS as MEDIA_FUNCS
-from core.tools.productivity import PRODUCTIVITY_TOOLS, TOOL_FUNCTIONS as PRODUCTIVITY_FUNCS
-from core.tools.credentials import CREDENTIAL_TOOLS, TOOL_FUNCTIONS as CREDENTIAL_FUNCS
-from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
-from core.tools.coding import CODING_TOOLS, TOOL_FUNCTIONS as CODING_FUNCS
-from core.tools.ai import AI_TOOLS, TOOL_FUNCTIONS as AI_FUNCS
-from core.tools.automation import AUTOMATION_TOOLS, TOOL_FUNCTIONS as AUTOMATION_FUNCS
-from core.tools.browser import BROWSER_TOOLS, TOOL_FUNCTIONS as BROWSER_FUNCS
+from core.tools.web import WEB_TOOLS,TOOL_FUNCTIONS as WEB_FUNCS
+from core.tools.system import SYSTEM_TOOLS,TOOL_FUNCTIONS as SYSTEM_FUNCS
+from core.tools.desktop import DESKTOP_TOOLS,TOOL_FUNCTIONS as DESKTOP_FUNCS
+from core.tools.privacy import PRIVACY_TOOLS,TOOL_FUNCTIONS as PRIVACY_FUNCS
+from core.tools.extra import EXTRA_TOOLS,TOOL_FUNCTIONS as EXTRA_FUNCS
+from core.tools.media import MEDIA_TOOLS,TOOL_FUNCTIONS as MEDIA_FUNCS
+from core.tools.productivity import PRODUCTIVITY_TOOLS,TOOL_FUNCTIONS as PRODUCTIVITY_FUNCS
+from core.tools.credentials import CREDENTIAL_TOOLS,TOOL_FUNCTIONS as CREDENTIAL_FUNCS
+from core.tools.developer import DEVELOPER_TOOLS,TOOL_FUNCTIONS as DEVELOPER_FUNCS
+from core.tools.coding import CODING_TOOLS,TOOL_FUNCTIONS as CODING_FUNCS
+from core.tools.ai import AI_TOOLS,TOOL_FUNCTIONS as AI_FUNCS
+from core.tools.automation import AUTOMATION_TOOLS,TOOL_FUNCTIONS as AUTOMATION_FUNCS
+from core.tools.browser import BROWSER_TOOLS,TOOL_FUNCTIONS as BROWSER_FUNCS
 console=Console()
 HIGH_RISK_PATTERNS=[r"hack",r"exploit",r"payload",r"metasploit",r"nmap",r"sqlmap",r"keylog",r"rat\b",r"backdoor",r"rootkit",r"c2\b",r"reverse.?shell",r"bind.?shell",r"privilege.?escalation",r"mimikatz",r"credential.?dump",r"password.?crack",r"ddos",r"botnet",r"ransomware",r"format\s+c:",r"rm\s+-rf\s+/",r"mkfs",r"dd\s+if="]
 SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch","close_application","copy_path","move_path","create_folder","browser_download"}
 class JagXAgent:
-    """Main tool-calling agent for JagX."""
     def __init__(self,config_path="config/settings.yaml"):
-        self.config=self._load_config(config_path); self.llm=create_llm_from_config(self.config)
-        self.memory=Memory(self.config.get("memory",{}).get("path","./data/memory")); self.messages=[]; self.running=False
+        self.config=self._load_config(config_path); self.llm=create_llm_from_config(self.config); self.memory=Memory(self.config.get("memory",{}).get("path","./data/memory")); self.messages=[]; self.running=False
         context=self.memory.get_context_summary()
-        if context and context!="No long-term memory yet.": self.llm.system_prompt+=f"\n\n### Personal Memory\n{context}"
-        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**CODING_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS,**BROWSER_FUNCS}
-        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS+BROWSER_TOOLS
+        if context!="No long-term memory yet.": self.llm.system_prompt+=f"\n\n### Personal Memory\n{context}\n\nUse this context when relevant. If older details are needed, use the memory_search tool. Never expose secrets from memory."
+        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**CODING_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS,**BROWSER_FUNCS,"memory_search":self.memory.search,"memory_forget":self.memory.forget}
+        memory_tools=[{"type":"function","function":{"name":"memory_search","description":"Search JagX's local long-term memory for relevant facts, preferences, notes, or past conversation context.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":8}},"required":["query"]}}},{"type":"function","function":{"name":"memory_forget","description":"Forget matching memories from local long-term memory. Use when the user asks JagX to forget something.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}]
+        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS+BROWSER_TOOLS+memory_tools
         console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded — model: {self.llm.model}")
     def _load_config(self,path):
         try:
             with open(path,encoding="utf-8") as f:return yaml.safe_load(f) or {}
         except Exception:return {}
     def _needs_confirmation(self,name,arguments):
-        text=(name+" "+json.dumps(arguments)).lower(); return name in SENSITIVE_TOOLS or any(re.search(p,text,re.I) for p in HIGH_RISK_PATTERNS)
+        text=(name+" "+json.dumps(arguments)).lower(); return name in SENSITIVE_TOOLS or name=="memory_forget" or any(re.search(p,text,re.I) for p in HIGH_RISK_PATTERNS)
     def _execute_tool(self,name,arguments):
         func=self.tool_functions.get(name)
         if not func:return f"Unknown tool: {name}"
@@ -64,7 +63,9 @@ class JagXAgent:
                     self.messages.append({"role":"tool","tool_call_id":call.get("id",name),"name":name,"content":result})
                 continue
             content=response.get("content") or ""; self.messages.append({"role":"assistant","content":content})
-            if any(w in user_input.lower() for w in ["remember","my name is","i like","i prefer","note that"]):self.memory.add_note(user_input)
+            low=user_input.lower()
+            if any(w in low for w in ["remember","my name is","i like","i prefer","note that"]): self.memory.add_note(user_input)
+            self.memory.record_conversation(user_input,content)
             return content
         return "I reached the maximum number of tool rounds. Please try a simpler request."
     def run(self):
