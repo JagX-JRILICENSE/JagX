@@ -1,0 +1,102 @@
+name: Build JagX Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - 'installer/**'
+      - 'build_windows.bat'
+      - 'build_installer.bat'
+      - '.github/workflows/windows-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-installer:
+    name: Build JagX Setup.exe
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout JagX
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build standalone JagX executable
+        shell: pwsh
+        run: |
+          if (Test-Path dist) { Remove-Item dist -Recurse -Force }
+          if (Test-Path build) { Remove-Item build -Recurse -Force }
+          pyinstaller --noconfirm --clean `
+            --name "JagX" `
+            --windowed `
+            --add-data "config;config" `
+            --add-data "core;core" `
+            --add-data "voice;voice" `
+            --add-data "ui;ui" `
+            --hidden-import "pystray._win32" `
+            --hidden-import "PIL._tkinter_finder" `
+            --hidden-import "edge_tts" `
+            --hidden-import "faster_whisper" `
+            --collect-all "edge_tts" `
+            --collect-all "faster_whisper" `
+            main.py
+          if (-not (Test-Path 'dist/JagX/JagX.exe')) {
+            throw 'PyInstaller did not create dist/JagX/JagX.exe'
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist_installer | Out-Null
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            $iscc = Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe'
+          }
+          if (-not (Test-Path $iscc)) {
+            throw 'Inno Setup compiler (ISCC.exe) was not found.'
+          }
+          & $iscc 'installer/JagX.iss'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path 'dist_installer/JagX_Setup.exe')) {
+            throw 'Installer was not created.'
+          }
+
+      - name: Upload JagX installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: JagX-Windows-Installer
+          path: dist_installer/JagX_Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: JagX-Windows-Portable
+          path: dist/JagX/
+          if-no-files-found: error
+          retention-days: 30
