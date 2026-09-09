@@ -20,6 +20,7 @@ from core.tools.extra import EXTRA_TOOLS, TOOL_FUNCTIONS as EXTRA_FUNCS
 from core.tools.media import MEDIA_TOOLS, TOOL_FUNCTIONS as MEDIA_FUNCS
 from core.tools.productivity import PRODUCTIVITY_TOOLS, TOOL_FUNCTIONS as PRODUCTIVITY_FUNCS
 from core.tools.credentials import CREDENTIAL_TOOLS, TOOL_FUNCTIONS as CREDENTIAL_FUNCS
+from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
 
 console = Console()
 HIGH_RISK_PATTERNS = [
@@ -28,7 +29,10 @@ HIGH_RISK_PATTERNS = [
     r"privilege.?escalation", r"mimikatz", r"credential.?dump", r"password.?crack",
     r"ddos", r"botnet", r"ransomware", r"format\s+c:", r"rm\s+-rf\s+/", r"mkfs", r"dd\s+if=",
 ]
-SENSITIVE_TOOLS = {"run_shell", "delete_path", "uninstall_app", "write_file", "write_text_file", "set_clipboard", "save_credential"}
+SENSITIVE_TOOLS = {
+    "run_shell", "run_project_tests", "delete_path", "uninstall_app", "write_file",
+    "write_text_file", "set_clipboard", "save_credential", "create_project_structure",
+}
 
 class JagXAgent:
     """Main tool-calling agent for JagX."""
@@ -41,8 +45,14 @@ class JagXAgent:
         memory_context = self.memory.get_context_summary()
         if memory_context and memory_context != "No long-term memory yet.":
             self.llm.system_prompt += f"\n\n### Personal Memory\n{memory_context}"
-        self.tool_functions = {**WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **CREDENTIAL_FUNCS}
-        self.tool_definitions = WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + CREDENTIAL_TOOLS
+        self.tool_functions = {
+            **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **EXTRA_FUNCS,
+            **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **CREDENTIAL_FUNCS, **DEVELOPER_FUNCS,
+        }
+        self.tool_definitions = (
+            WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS
+            + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + CREDENTIAL_TOOLS + DEVELOPER_TOOLS
+        )
         console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
@@ -75,7 +85,6 @@ class JagXAgent:
                     fn = call["function"]; name = fn["name"]
                     try: args = json.loads(fn.get("arguments", "{}"))
                     except json.JSONDecodeError: args = {}
-                    # Never allow a password returned by a credential tool to be fed back into chat history.
                     result = self._execute_tool(name, args)
                     if name == "request_password" and not result.startswith("PASSWORD_INPUT_ERROR"):
                         result = "PASSWORD_RECEIVED_SECURELY: the password is available only to the local tool flow and must not be repeated or stored in conversation memory."
