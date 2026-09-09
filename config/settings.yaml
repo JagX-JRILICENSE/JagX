@@ -3,7 +3,7 @@
 
 app:
   name: "JagX"
-  version: "0.3.0-dev"
+  version: "0.4.0-dev"
   license: "JRILICENSE"
 
 llm:
@@ -13,9 +13,17 @@ llm:
   temperature: 0.7
   auto_detect_models: true
 
+image_generation:
+  enabled: true
+  provider: "auto"             # auto currently uses OpenAI when OPENAI_API_KEY is available
+  openai_model: "gpt-image-1"
+  output_dir: "./data/generated_images"
+  open_after_generate: false
+
 voice:
   enabled: true
   wake_word: "jagx"
+  stt_model_size: "base"
   stt_model: "base"
   tts_voice: "en-US-AriaNeural"
   language: "en"
