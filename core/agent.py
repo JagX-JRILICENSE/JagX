@@ -46,7 +46,7 @@ class JagXAgent:
         if memory_context and memory_context != "No long-term memory yet.":
             self.llm.system_prompt += f"\n\n### Personal Memory\n{memory_context}"
         self.tool_functions = {
-            **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **EXTRA_FUNCS,
+            **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS,
             **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **CREDENTIAL_FUNCS, **DEVELOPER_FUNCS,
         }
         self.tool_definitions = (
