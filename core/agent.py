@@ -32,6 +32,7 @@ HIGH_RISK_PATTERNS = [
 SENSITIVE_TOOLS = {
     "run_shell", "run_project_tests", "delete_path", "uninstall_app", "write_file",
     "write_text_file", "set_clipboard", "save_credential", "create_project_structure",
+    "kill_process_by_name", "block_camera_access",
 }
 
 class JagXAgent:
