@@ -1,19 +1,24 @@
 """JagX browser automation using Playwright with installed Chrome/Edge.
 
-The browser controller uses a dedicated JagX profile, never receives passwords,
-and exposes DOM-based navigation, inspection, clicking, typing and downloads.
+Normal typing refuses password/OTP fields. Saved credentials can be filled only
+by a dedicated local tool which retrieves the secret from the OS credential
+store and inserts it directly into the browser; the secret is never returned.
 JRILICENSE
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
     sync_playwright = None
+
+try:
+    from core.tools.credentials import get_credential
+except Exception:
+    get_credential = None
 
 _browser = None
 _context = None
@@ -41,7 +46,6 @@ def _ensure():
     if executable:
         launch["executable_path"] = executable
     _browser = _pw.chromium.launch(**launch)
-    profile = Path.home() / ".jagx" / "browser-profile"
     _context = _browser.new_context(accept_downloads=True, viewport={"width": 1440, "height": 900})
     _page = _context.new_page()
     return _page
@@ -56,7 +60,6 @@ def browser_status() -> str:
 
 
 def browser_navigate(url: str) -> str:
-    """Navigate the JagX-controlled browser to a URL."""
     page = _ensure()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
@@ -77,10 +80,8 @@ def browser_forward() -> str:
 
 
 def browser_get_page_text(max_chars: int = 12000) -> str:
-    """Extract visible text from the current page for JagX to reason about."""
     page = _ensure()
-    text = page.locator("body").inner_text(timeout=10000)
-    return text[:max_chars]
+    return page.locator("body").inner_text(timeout=10000)[:max_chars]
 
 
 def browser_find_links(max_results: int = 40) -> str:
@@ -97,32 +98,57 @@ def browser_find_links(max_results: int = 40) -> str:
     return "\n".join(rows) or "No links found."
 
 
+def _is_sensitive(target) -> bool:
+    input_type = (target.get_attribute("type") or "").lower()
+    name = ((target.get_attribute("name") or "") + " " + (target.get_attribute("aria-label") or "") + " " + (target.get_attribute("placeholder") or "")).lower()
+    return input_type == "password" or any(x in name for x in ("password", "passcode", "otp", "one-time", "verification code", "security code"))
+
+
 def browser_click(selector: str) -> str:
-    """Click a DOM element using a CSS/text selector. Avoid password/credential controls."""
     page = _ensure()
     target = page.locator(selector).first
+    if _is_sensitive(target):
+        return "Blocked: credential/verification controls cannot be automated by normal browser_click."
     tag = target.evaluate("el => el.tagName.toLowerCase()")
-    input_type = target.get_attribute("type") or ""
-    name = ((target.get_attribute("name") or "") + " " + (target.get_attribute("aria-label") or "")).lower()
-    if input_type.lower() == "password" or any(x in name for x in ("password", "passcode", "otp", "one-time", "verification code")):
-        return "Blocked: credential/verification controls cannot be automated by JagX."
     target.click(timeout=10000)
     return f"Clicked {tag} matching: {selector}"
 
 
 def browser_type(selector: str, text: str, clear: bool = True) -> str:
-    """Type non-secret text into a DOM field; password/OTP fields are blocked."""
     page = _ensure()
     target = page.locator(selector).first
-    input_type = (target.get_attribute("type") or "").lower()
-    name = ((target.get_attribute("name") or "") + " " + (target.get_attribute("aria-label") or "") + " " + (target.get_attribute("placeholder") or "")).lower()
-    if input_type == "password" or any(x in name for x in ("password", "passcode", "otp", "one-time", "verification code", "security code")):
-        return "Blocked: JagX will not enter passwords, OTPs, or verification codes."
+    if _is_sensitive(target):
+        return "Blocked: use browser_fill_saved_credential for a stored password; OTP and verification codes remain manual."
     if clear:
         target.fill(text)
     else:
         target.type(text)
     return f"Entered text into: {selector}"
+
+
+def browser_fill_saved_credential(account: str, selector: str = "input[type='password']") -> str:
+    """Fill a stored OS credential directly into a password field without exposing it.
+
+    The account label is passed to the local keyring lookup. The actual secret
+    is consumed inside this function and is never returned in the tool result.
+    """
+    if get_credential is None:
+        return "Secure credential integration unavailable."
+    page = _ensure()
+    result = get_credential(account)
+    if not result.startswith("SECURE_CREDENTIAL:"):
+        return "Saved credential unavailable for that account."
+    secret = result[len("SECURE_CREDENTIAL:"):]
+    try:
+        target = page.locator(selector).first
+        input_type = (target.get_attribute("type") or "").lower()
+        if input_type != "password":
+            return "Blocked: the selected field is not a password field."
+        target.fill(secret)
+        return "Stored credential filled into the selected password field. The password was not returned or logged."
+    finally:
+        secret = ""
+        result = ""
 
 
 def browser_select(selector: str, value: str) -> str:
@@ -132,7 +158,6 @@ def browser_select(selector: str, value: str) -> str:
 
 
 def browser_download(selector: str, save_path: str = "") -> str:
-    """Click a download control and save the resulting file. Confirmation is required by the agent."""
     page = _ensure()
     with page.expect_download(timeout=30000) as info:
         page.locator(selector).first.click(timeout=10000)
@@ -174,8 +199,9 @@ BROWSER_TOOLS = [
     {"type":"function","function":{"name":"browser_forward","description":"Go forward one page in the JagX-controlled browser.","parameters":{"type":"object","properties":{},"required":[]}}},
     {"type":"function","function":{"name":"browser_get_page_text","description":"Read visible text from the current browser page.","parameters":{"type":"object","properties":{"max_chars":{"type":"integer","default":12000}},"required":[]}}},
     {"type":"function","function":{"name":"browser_find_links","description":"List useful links on the current page with labels and hrefs.","parameters":{"type":"object","properties":{"max_results":{"type":"integer","default":40}},"required":[]}}},
-    {"type":"function","function":{"name":"browser_click","description":"Click a normal webpage element using a CSS or text selector. Credential controls are blocked.","parameters":{"type":"object","properties":{"selector":{"type":"string"}},"required":["selector"]}}},
-    {"type":"function","function":{"name":"browser_type","description":"Enter non-secret text into a webpage field. Password, OTP and verification fields are blocked.","parameters":{"type":"object","properties":{"selector":{"type":"string"},"text":{"type":"string"},"clear":{"type":"boolean","default":true}},"required":["selector","text"]}}},
+    {"type":"function","function":{"name":"browser_click","description":"Click a normal webpage element. Credential controls are blocked.","parameters":{"type":"object","properties":{"selector":{"type":"string"}},"required":["selector"]}}},
+    {"type":"function","function":{"name":"browser_type","description":"Enter non-secret text. Password, OTP and verification fields are blocked.","parameters":{"type":"object","properties":{"selector":{"type":"string"},"text":{"type":"string"},"clear":{"type":"boolean","default":true}},"required":["selector","text"]}}},
+    {"type":"function","function":{"name":"browser_fill_saved_credential","description":"Fill a password field directly from JagX's OS credential store. Never returns the password. OTP/verification remains manual.","parameters":{"type":"object","properties":{"account":{"type":"string"},"selector":{"type":"string","default":"input[type='password']"}},"required":["account"]}}},
     {"type":"function","function":{"name":"browser_select","description":"Select an option from a webpage select element.","parameters":{"type":"object","properties":{"selector":{"type":"string"},"value":{"type":"string"}},"required":["selector","value"]}}},
     {"type":"function","function":{"name":"browser_download","description":"Click a webpage download control and save the downloaded file. User confirmation is required.","parameters":{"type":"object","properties":{"selector":{"type":"string"},"save_path":{"type":"string","default":""}},"required":["selector"]}}},
     {"type":"function","function":{"name":"browser_screenshot","description":"Capture the current browser page as an image.","parameters":{"type":"object","properties":{"path":{"type":"string","default":"jagx_browser.png"}},"required":[]}}},
@@ -184,6 +210,6 @@ BROWSER_TOOLS = [
 
 TOOL_FUNCTIONS = {name: globals()[name] for name in [
     "browser_status", "browser_navigate", "browser_back", "browser_forward", "browser_get_page_text",
-    "browser_find_links", "browser_click", "browser_type", "browser_select", "browser_download",
-    "browser_screenshot", "browser_close"
+    "browser_find_links", "browser_click", "browser_type", "browser_fill_saved_credential",
+    "browser_select", "browser_download", "browser_screenshot", "browser_close"
 ]}
