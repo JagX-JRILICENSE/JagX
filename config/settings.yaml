@@ -1,0 +1,40 @@
+# JagX Configuration
+# JRILICENSE
+
+app:
+  name: "JagX"
+  version: "0.1.0-dev"
+  license: "JRILICENSE"
+
+llm:
+  provider: "ollama"          # ollama | openai_compatible
+  model: "llama3.1"           # Change to your preferred local model
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  # For cloud fallback (optional):
+  # api_key_env: "GROK_API_KEY" or "OPENAI_API_KEY"
+
+voice:
+  enabled: true
+  wake_word: "jagx"
+  stt_model: "base"           # faster-whisper model size
+  tts_voice: "en-US-AriaNeural"  # edge-tts voice
+  language: "en"
+
+safety:
+  confirmation_mode: true     # Ask before dangerous actions
+  allowed_paths:              # Restrict file access if desired
+    - "~"
+  blocked_commands:           # Never allow these
+    - "rm -rf /"
+    - "format"
+    - "mkfs"
+
+system:
+  platform: "auto"            # auto | windows | macos | linux
+  tray_icon: true
+  always_on: true
+
+memory:
+  enabled: true
+  path: "./data/memory"
