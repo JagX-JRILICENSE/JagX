@@ -28,7 +28,8 @@ jobs:
       - name: Build JagX OS
         run: |
           chmod +x jagx_os/build_jagx_os.sh jagx_os/jagx-session.sh
-          ./jagx_os/build_jagx_os.sh
+          sudo ./jagx_os/build_jagx_os.sh
+          sudo chmod -R a+rX jagx_os/dist
 
       - name: Upload JagX OS ISO
         uses: actions/upload-artifact@v4
