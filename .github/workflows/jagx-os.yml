@@ -1,0 +1,39 @@
+name: Build JagX OS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'jagx_os/**'
+      - '.github/workflows/jagx-os.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-jagx-os:
+    name: Build JagX OS amd64 ISO
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout JagX
+        uses: actions/checkout@v4
+
+      - name: Install live-build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y live-build debootstrap squashfs-tools xorriso
+
+      - name: Build JagX OS
+        run: |
+          chmod +x jagx_os/build_jagx_os.sh jagx_os/jagx-session.sh
+          ./jagx_os/build_jagx_os.sh
+
+      - name: Upload JagX OS ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: JagX-OS-amd64
+          path: jagx_os/dist/JagX-OS-amd64.iso
+          if-no-files-found: error
+          retention-days: 30
