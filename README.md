@@ -21,7 +21,7 @@ JagX is designed with **full system privileges** in mind:
 - Application launching & control
 - Shell command execution
 - System updates & package management
-- Network access
+- Network / internet access (when laptop or hotspot is connected)
 
 **This is extremely powerful and dangerous.**
 
@@ -43,6 +43,7 @@ When you say **"JagX"**, it wakes up, greets you in voice, and starts executing 
 - Install / update software
 - Manage your projects
 - Automate repetitive tasks
+- Search the internet and gather information when needed
 - Answer questions while having full context of your machine
 - Stay running in the background like a living presence
 
@@ -50,71 +51,76 @@ It is trained/fine-tuned primarily for **you** (personal data, preferences, work
 
 ---
 
-## Architecture (Planned)
+## Current Capabilities (Working Now)
+
+- Local LLM via **Ollama** (or any OpenAI-compatible API)
+- Full **tool-calling agent** loop
+- **Internet tools**: `web_search` + `fetch_url` (works whenever your laptop/hotspot has internet)
+- **Local system tools**:
+  - List directories
+  - Read / write files
+  - Run shell commands
+  - Get system info
+- Interactive text chat interface
+
+---
+
+## Quick Start
+
+1. Install [Ollama](https://ollama.com) and pull a model:
+   ```bash
+   ollama pull llama3.1
+   # or mistral, qwen2.5, phi3, etc.
+   ```
+
+2. Clone & install:
+   ```bash
+   git clone https://github.com/JagX-JRILICENSE/JagX.git
+   cd JagX
+   pip install -r requirements.txt
+   ```
+
+3. Run:
+   ```bash
+   python main.py
+   ```
+
+JagX will start. You can ask it to search the web, list your files, run commands, etc.
+
+---
+
+## Architecture
 
 ```
 JagX/
 ├── core/
-│   ├── agent.py          # Main agent loop + tool calling
-│   ├── llm.py            # Local / remote LLM interface
-│   ├── memory.py         # Personal memory & context
-│   └── tools/            # System tools
-│       ├── filesystem.py
-│       ├── mouse_keyboard.py
-│       ├── shell.py
-│       ├── apps.py
-│       └── system.py
-├── voice/
-│   ├── wakeword.py       # "JagX" detection
-│   ├── stt.py            # Speech-to-Text
-│   └── tts.py            # Text-to-Speech
-├── ui/
-│   └── tray.py           # System tray presence
+│   ├── agent.py          # Full tool-calling agent loop
+│   ├── llm.py            # Ollama + OpenAI-compatible client
+│   └── tools/
+│       ├── web.py         # Internet search & page fetch
+│       └── system.py      # Filesystem + shell access
+├── voice/               # (coming next)
 ├── config/
 │   └── settings.yaml
-├── data/               # Personal memory, logs, models
 ├── requirements.txt
-└── main.py             # Entry point
+└── main.py
 ```
-
----
-
-## Tech Stack (Recommended)
-
-- **Language**: Python 3.11+
-- **LLM**: Ollama (local) + optional cloud fallback (Grok, Claude, GPT, etc.)
-- **Voice**:
-  - Wake word: openWakeWord or Porcupine
-  - STT: Whisper (local) or faster-whisper
-  - TTS: Piper, Coqui, or edge-tts
-- **System Control**:
-  - `pyautogui` / `pynput` (mouse + keyboard)
-  - `subprocess` + `psutil`
-  - Platform-specific tools (AppleScript / PowerShell / xdotool)
-- **Agent Framework**: Custom or LangGraph / Open Interpreter style
-- **Background**: System tray + systemd / launchd / Windows service
-
----
-
-## Current Status
-
-🚧 **Scaffolding phase**  
-Repository just created. Core structure and first working prototype coming next.
 
 ---
 
 ## Roadmap
 
 1. [x] Create repository & branding
-2. [ ] Basic project structure
-3. [ ] Local LLM connection (Ollama)
-4. [ ] Core tools (files, shell, mouse)
+2. [x] Basic project structure
+3. [x] Local LLM connection (Ollama) + tool calling
+4. [x] Core tools (files, shell) + Internet tools
 5. [ ] Voice pipeline (wake word → STT → Agent → TTS)
 6. [ ] Confirmation / safety modes
-7. [ ] Personal memory system
-8. [ ] System tray + always-on mode
-9. [ ] Installer / one-click setup
-10. [ ] Fine-tuning path for personal data
+7. [ ] Mouse & keyboard control
+8. [ ] Personal memory system
+9. [ ] System tray + always-on mode
+10. [ ] Installer / one-click setup
+11. [ ] Fine-tuning path for personal data
 
 ---
 
