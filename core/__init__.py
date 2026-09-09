@@ -1,0 +1,2 @@
+# JagX Core
+# JRILICENSE
