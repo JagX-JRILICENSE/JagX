@@ -3,7 +3,7 @@
 
 app:
   name: "JagX"
-  version: "0.1.0-dev"
+  version: "0.2.0-dev"
   license: "JRILICENSE"
 
 llm:
@@ -11,27 +11,27 @@ llm:
   model: "llama3.1"           # Change to your preferred local model
   base_url: "http://localhost:11434"
   temperature: 0.7
-  # For cloud fallback (optional):
-  # api_key_env: "GROK_API_KEY" or "OPENAI_API_KEY"
 
 voice:
   enabled: true
   wake_word: "jagx"
-  stt_model: "base"           # faster-whisper model size
+  stt_model: "base"           # base | small | medium | large-v3 (bigger = more accurate, slower)
   tts_voice: "en-US-AriaNeural"  # edge-tts voice
   language: "en"
+  silence_threshold: 0.015
+  silence_duration: 1.4
+  max_record_seconds: 25
 
 safety:
-  confirmation_mode: true     # Ask before dangerous actions
-  allowed_paths:              # Restrict file access if desired
-    - "~"
-  blocked_commands:           # Never allow these
+  # Only confirm on high-risk / hacking-related actions
+  high_risk_only: true
+  blocked_commands:
     - "rm -rf /"
     - "format"
     - "mkfs"
 
 system:
-  platform: "auto"            # auto | windows | macos | linux
+  platform: "auto"
   tray_icon: true
   always_on: true
 
