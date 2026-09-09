@@ -3,27 +3,27 @@
 
 app:
   name: "JagX"
-  version: "0.2.0-dev"
+  version: "0.3.0-dev"
   license: "JRILICENSE"
 
 llm:
-  provider: "ollama"          # ollama | openai_compatible
-  model: "llama3.1"           # Change to your preferred local model
+  provider: "ollama"          # local Ollama is preferred
+  model: "qwen2.5"             # JagX prefers qwen2.5 when installed, with automatic fallback
   base_url: "http://localhost:11434"
   temperature: 0.7
+  auto_detect_models: true
 
 voice:
   enabled: true
   wake_word: "jagx"
-  stt_model: "base"           # base | small | medium | large-v3 (bigger = more accurate, slower)
-  tts_voice: "en-US-AriaNeural"  # edge-tts voice
+  stt_model: "base"
+  tts_voice: "en-US-AriaNeural"
   language: "en"
   silence_threshold: 0.015
   silence_duration: 1.4
   max_record_seconds: 25
 
 safety:
-  # Only confirm on high-risk / hacking-related actions
   high_risk_only: true
   blocked_commands:
     - "rm -rf /"
