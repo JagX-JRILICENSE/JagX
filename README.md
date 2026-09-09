@@ -4,6 +4,8 @@
 
 > Say **"JagX"** and it answers.
 
+**GitHub Repository:** https://github.com/JagX-JRILICENSE/JagX
+
 Local-first • Voice controlled • Full system access • Internet enabled • Privacy conscious
 
 **License**: JRILICENSE
@@ -20,120 +22,93 @@ Only install it on a computer you fully own and trust.
 ## Features
 
 - Continuous voice listening + wake word **"JagX"**
-- Local speech recognition (Whisper) + high-quality TTS
+- Local speech recognition + high-quality voice replies
 - Local LLM (Ollama) with full tool calling
-- Internet search & page reading (when online / hotspot on)
-- File management (list, read, write, **easy delete**)
-- App uninstall
+- Internet search (works when laptop/hotspot is online)
+- Easy file delete & app uninstall
 - Mouse + keyboard control
 - Clipboard, notifications, open websites & apps
 - Camera / microphone privacy scanner
-- Personal memory that remembers you
-- Smart safety (only asks confirmation for high-risk/hacking actions)
-- System tray icon — runs quietly in the background
+- Personal memory
+- Smart safety (only confirms high-risk actions)
+- System tray icon (runs in background)
+- Professional Windows installer
 
 ---
 
-## Quick Start (Developer Mode)
+## Repository Link
 
-```bash
-git clone https://github.com/JagX-JRILICENSE/JagX.git
-cd JagX
-pip install -r requirements.txt
-
-# Make sure Ollama is installed and a model is pulled
-ollama pull llama3.1
-
-# Run (tray mode is default — best experience)
-python main.py
-
-# Other modes
-python main.py --mode voice
-python main.py --mode text
-```
+**https://github.com/JagX-JRILICENSE/JagX**
 
 ---
 
-## Build the Windows App (Recommended)
+## Option A — Build the Full Windows Installer (Recommended)
 
-This creates a real Windows executable you can run without Python.
+### Requirements
+- Windows 10/11
+- Python 3.11+
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php) (free)
 
 ### Steps
 
-1. Make sure you have **Python 3.11+** installed and added to PATH.
-2. Open Command Prompt or PowerShell **in the JagX folder**.
-3. Double-click or run:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/JagX-JRILICENSE/JagX.git
+   cd JagX
+   ```
+
+2. Double-click **`build_installer.bat`**
+
+   This will:
+   - Create the standalone app
+   - Generate a professional installer: `dist_installer\JagX_Setup.exe`
+
+3. Run `JagX_Setup.exe` to install JagX like any normal Windows program.
+
+---
+
+## Option B — Quick Executable Only
 
 ```bat
 build_windows.bat
 ```
 
-4. Wait 3–8 minutes. When it finishes you will see:
-
-```
-dist\JagX\JagX.exe
-```
-
-5. You can now:
-   - Double-click `JagX.exe` to run
-   - Copy the whole `dist\JagX` folder anywhere
-   - Create a desktop shortcut to `JagX.exe`
-   - (Optional) Right-click → Pin to Start / Taskbar
+Then run `dist\JagX\JagX.exe`
 
 ---
 
-## What To Do After Installing / First Run
+## What To Do After Installing
 
-1. **Allow Microphone**  
-   Windows will ask for microphone permission → click Allow.
+1. **Allow Microphone** when Windows asks.
+2. Install and start **Ollama** → `ollama pull llama3.1`
+3. Look for the **orange icon** in the system tray (near the clock).
+4. Right-click the icon for menu options.
+5. Say clearly:
 
-2. **Start Ollama** (if you want the smart local brain)  
-   Make sure Ollama is running in the background (`ollama serve` or just open the Ollama app).
+   > **"JagX"**
 
-3. **Look for the orange icon** in the system tray (bottom-right near the clock).
+   Then give your command.
 
-4. **Right-click the icon** for the menu:
-   - Toggle Voice
-   - Quit JagX
-
-5. **Talk to it**:
-   - Say clearly: **"JagX"**
-   - Wait for the short reply ("Yes?")
-   - Then give your command
-
-### Good first commands to try
+### Great first commands
 
 - "JagX, what can you do?"
 - "JagX, check if anything is using my camera"
 - "JagX, list files on my Desktop"
 - "JagX, open Notepad"
-- "JagX, search the web for latest AI news"
-- "JagX, remember that my name is [Your Name]"
+- "JagX, search the web for AI news"
+- "JagX, remember that my name is ..."
 
 ---
 
-## Recommended Settings After Install
+## Developer Mode (no build needed)
 
-Edit `config/settings.yaml` (inside the app folder) if you want:
-
-```yaml
-voice:
-  stt_model: "small"     # better accuracy than "base"
-  tts_voice: "en-US-AriaNeural"
-
-llm:
-  model: "llama3.1"      # or qwen2.5, mistral, phi3, etc.
+```bash
+git clone https://github.com/JagX-JRILICENSE/JagX.git
+cd JagX
+pip install -r requirements.txt
+ollama pull llama3.1
+python main.py
 ```
-
-Bigger Whisper models (`small` / `medium`) understand speech much better but use more RAM.
-
----
-
-## Auto-start with Windows (Optional)
-
-1. Press `Win + R` → type `shell:startup` → Enter
-2. Create a shortcut to `JagX.exe` inside that folder
-3. JagX will now start automatically when you log in
 
 ---
 
@@ -141,11 +116,13 @@ Bigger Whisper models (`small` / `medium`) understand speech much better but use
 
 ```
 JagX/
-├── main.py              # Entry point (tray mode default)
-├── build_windows.bat    # One-click Windows build
-├── core/                # Agent + LLM + tools
-├── voice/               # Full voice pipeline
-├── ui/                  # System tray
+├── main.py
+├── build_windows.bat          # Creates the .exe
+├── build_installer.bat        # Creates the full Setup.exe
+├── installer/JagX.iss         # Inno Setup script
+├── core/                      # Agent, LLM, tools
+├── voice/                     # Full voice pipeline
+├── ui/                        # System tray
 ├── config/settings.yaml
 └── requirements.txt
 ```
@@ -155,7 +132,7 @@ JagX/
 ## License
 
 **JRILICENSE**  
-Personal use only. All rights reserved to the owner.
+Personal use only. All rights reserved.
 
 ---
 
