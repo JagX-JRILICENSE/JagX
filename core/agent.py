@@ -21,6 +21,7 @@ from core.tools.media import MEDIA_TOOLS, TOOL_FUNCTIONS as MEDIA_FUNCS
 from core.tools.productivity import PRODUCTIVITY_TOOLS, TOOL_FUNCTIONS as PRODUCTIVITY_FUNCS
 from core.tools.credentials import CREDENTIAL_TOOLS, TOOL_FUNCTIONS as CREDENTIAL_FUNCS
 from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
+from core.tools.ai import AI_TOOLS, TOOL_FUNCTIONS as AI_FUNCS
 
 console = Console()
 HIGH_RISK_PATTERNS = [
@@ -48,13 +49,13 @@ class JagXAgent:
             self.llm.system_prompt += f"\n\n### Personal Memory\n{memory_context}"
         self.tool_functions = {
             **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS,
-            **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **CREDENTIAL_FUNCS, **DEVELOPER_FUNCS,
+            **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **CREDENTIAL_FUNCS, **DEVELOPER_FUNCS, **AI_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS
-            + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + CREDENTIAL_TOOLS + DEVELOPER_TOOLS
+            + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + CREDENTIAL_TOOLS + DEVELOPER_TOOLS + AI_TOOLS
         )
-        console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded")
+        console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded — model: {self.llm.model}")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
