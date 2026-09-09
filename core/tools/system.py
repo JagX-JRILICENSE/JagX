@@ -9,6 +9,7 @@ JRILICENSE
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import platform
@@ -107,8 +108,6 @@ def get_system_info() -> str:
     }
     return json.dumps(info, indent=2)
 
-
-import json
 
 # Tool definitions for the LLM
 SYSTEM_TOOLS = [
