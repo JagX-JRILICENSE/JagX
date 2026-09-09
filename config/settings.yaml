@@ -17,6 +17,7 @@ image_generation:
   enabled: true
   provider: "local"
   comfyui_url: "http://127.0.0.1:8188"
+  workflow_path: "./config/image_workflow.json"
   output_dir: "./data/generated_images"
   open_after_generate: false
 
