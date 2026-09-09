@@ -21,18 +21,34 @@ Only install it on a computer you fully own and trust.
 
 ## Features
 
+- Windows-style Command Center dashboard
 - Continuous voice listening + wake word **"JagX"**
 - Local speech recognition + high-quality voice replies
 - Local LLM (Ollama) with full tool calling
-- Internet search (works when laptop/hotspot is online)
-- Easy file delete & app uninstall
+- Internet search and browser automation
+- App and file automation
 - Mouse + keyboard control
 - Clipboard, notifications, open websites & apps
 - Camera / microphone privacy scanner
-- Personal memory
+- Personal long-term memory
+- Screen understanding and screenshots
+- **Image Studio: generate original images from natural-language prompts**
+- Generated images saved locally under `data/generated_images`
 - Smart safety (only confirms high-risk actions)
 - System tray icon (runs in background)
 - Professional Windows installer
+
+### Image Studio setup
+
+JagX's Image Studio uses the OpenAI image API when `image_generation.provider` is `auto` or `openai` and `OPENAI_API_KEY` is available in the Windows environment. JagX never stores the API key in ordinary conversation memory. The default image model is `gpt-image-1`.
+
+Check readiness by asking JagX:
+
+> "Check Image Studio status."
+
+Then create an image with:
+
+> "Create an image of a futuristic jaguar-themed AI workstation."
 
 ---
 
@@ -80,7 +96,7 @@ Then run `dist\JagX\JagX.exe`
 ## What To Do After Installing
 
 1. **Allow Microphone** when Windows asks.
-2. Install and start **Ollama** → `ollama pull llama3.1`
+2. Install and start **Ollama** with your preferred local model; JagX automatically detects installed compatible models and prefers `qwen2.5`.
 3. Look for the **orange icon** in the system tray (near the clock).
 4. Right-click the icon for menu options.
 5. Say clearly:
@@ -97,6 +113,8 @@ Then run `dist\JagX\JagX.exe`
 - "JagX, open Notepad"
 - "JagX, search the web for AI news"
 - "JagX, remember that my name is ..."
+- "JagX, check Image Studio status"
+- "JagX, create an image for my project"
 
 ---
 
@@ -106,7 +124,6 @@ Then run `dist\JagX\JagX.exe`
 git clone https://github.com/JagX-JRILICENSE/JagX.git
 cd JagX
 pip install -r requirements.txt
-ollama pull llama3.1
 python main.py
 ```
 
@@ -122,7 +139,7 @@ JagX/
 ├── installer/JagX.iss         # Inno Setup script
 ├── core/                      # Agent, LLM, tools
 ├── voice/                     # Full voice pipeline
-├── ui/                        # System tray
+├── ui/                        # Windows Command Center
 ├── config/settings.yaml
 └── requirements.txt
 ```
