@@ -9,7 +9,9 @@
 ; ============================================================
 
 #define MyAppName "JagX"
+#ifndef MyAppVersion
 #define MyAppVersion "0.2.0"
+#endif
 #define MyAppPublisher "JagX-JRILICENSE"
 #define MyAppURL "https://github.com/JagX-JRILICENSE/JagX"
 #define MyAppExeName "JagX.exe"
@@ -49,7 +51,7 @@ Source: "..\dist\JagX\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppName}"; Tasks: desktopicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
 
 [Run]
