@@ -21,6 +21,9 @@ psutil>=5.9.0
 pyperclip>=1.9.0
 keyring>=25.0.0
 
+# Browser automation
+playwright>=1.55.0
+
 # UI / Tray
 pystray>=0.19.5
 Pillow>=10.0.0
