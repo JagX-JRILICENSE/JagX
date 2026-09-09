@@ -55,8 +55,10 @@ jobs:
             --hidden-import "PIL._tkinter_finder" `
             --hidden-import "edge_tts" `
             --hidden-import "faster_whisper" `
+            --hidden-import "playwright.sync_api" `
             --collect-all "edge_tts" `
             --collect-all "faster_whisper" `
+            --collect-all "playwright" `
             main.py
           if (-not (Test-Path 'dist/JagX/JagX.exe')) {
             throw 'PyInstaller did not create dist/JagX/JagX.exe'
