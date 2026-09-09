@@ -22,6 +22,7 @@ from core.tools.ai import AI_TOOLS,TOOL_FUNCTIONS as AI_FUNCS
 from core.tools.automation import AUTOMATION_TOOLS,TOOL_FUNCTIONS as AUTOMATION_FUNCS
 from core.tools.browser import BROWSER_TOOLS,TOOL_FUNCTIONS as BROWSER_FUNCS
 from core.tools.screen import SCREEN_TOOLS,TOOL_FUNCTIONS as SCREEN_FUNCS
+from core.tools.image import IMAGE_TOOLS,TOOL_FUNCTIONS as IMAGE_FUNCS
 console=Console()
 HIGH_RISK_PATTERNS=[r"hack",r"exploit",r"payload",r"metasploit",r"nmap",r"sqlmap",r"keylog",r"rat\b",r"backdoor",r"rootkit",r"c2\b",r"reverse.?shell",r"bind.?shell",r"privilege.?escalation",r"mimikatz",r"credential.?dump",r"password.?crack",r"ddos",r"botnet",r"ransomware",r"format\s+c:",r"rm\s+-rf\s+/",r"mkfs",r"dd\s+if="]
 SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch","close_application","copy_path","move_path","create_folder","browser_download"}
@@ -30,9 +31,9 @@ class JagXAgent:
         self.config=self._load_config(config_path); self.llm=create_llm_from_config(self.config); self.memory=Memory(self.config.get("memory",{}).get("path","./data/memory")); self.messages=[]; self.running=False
         context=self.memory.get_context_summary()
         if context!="No long-term memory yet.": self.llm.system_prompt+=f"\n\n### Personal Memory\n{context}\n\nUse this context when relevant. If older details are needed, use the memory_search tool. Never expose secrets from memory."
-        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**CODING_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS,**BROWSER_FUNCS,**SCREEN_FUNCS,"memory_search":self.memory.search,"memory_forget":self.memory.forget}
+        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**CODING_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS,**BROWSER_FUNCS,**SCREEN_FUNCS,**IMAGE_FUNCS,"memory_search":self.memory.search,"memory_forget":self.memory.forget}
         memory_tools=[{"type":"function","function":{"name":"memory_search","description":"Search JagX's local long-term memory for relevant facts, preferences, notes, or past conversation context.","parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":8}},"required":["query"]}}},{"type":"function","function":{"name":"memory_forget","description":"Forget matching memories from local long-term memory. Use when the user asks JagX to forget something.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}]
-        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS+BROWSER_TOOLS+SCREEN_TOOLS+memory_tools
+        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS+BROWSER_TOOLS+SCREEN_TOOLS+IMAGE_TOOLS+memory_tools
         console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded — model: {self.llm.model}")
     def _load_config(self,path):
         try:
