@@ -22,7 +22,7 @@ from core.tools.ai import AI_TOOLS, TOOL_FUNCTIONS as AI_FUNCS
 from core.tools.automation import AUTOMATION_TOOLS, TOOL_FUNCTIONS as AUTOMATION_FUNCS
 console=Console()
 HIGH_RISK_PATTERNS=[r"hack",r"exploit",r"payload",r"metasploit",r"nmap",r"sqlmap",r"keylog",r"rat\b",r"backdoor",r"rootkit",r"c2\b",r"reverse.?shell",r"bind.?shell",r"privilege.?escalation",r"mimikatz",r"credential.?dump",r"password.?crack",r"ddos",r"botnet",r"ransomware",r"format\s+c:",r"rm\s+-rf\s+/",r"mkfs",r"dd\s+if="]
-SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch"}
+SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch","close_application","copy_path","move_path","create_folder"}
 class JagXAgent:
     """Main tool-calling agent for JagX."""
     def __init__(self,config_path="config/settings.yaml"):
