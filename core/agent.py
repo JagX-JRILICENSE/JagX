@@ -17,11 +17,12 @@ from core.tools.media import MEDIA_TOOLS, TOOL_FUNCTIONS as MEDIA_FUNCS
 from core.tools.productivity import PRODUCTIVITY_TOOLS, TOOL_FUNCTIONS as PRODUCTIVITY_FUNCS
 from core.tools.credentials import CREDENTIAL_TOOLS, TOOL_FUNCTIONS as CREDENTIAL_FUNCS
 from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
+from core.tools.coding import CODING_TOOLS, TOOL_FUNCTIONS as CODING_FUNCS
 from core.tools.ai import AI_TOOLS, TOOL_FUNCTIONS as AI_FUNCS
 from core.tools.automation import AUTOMATION_TOOLS, TOOL_FUNCTIONS as AUTOMATION_FUNCS
-console = Console()
+console=Console()
 HIGH_RISK_PATTERNS=[r"hack",r"exploit",r"payload",r"metasploit",r"nmap",r"sqlmap",r"keylog",r"rat\b",r"backdoor",r"rootkit",r"c2\b",r"reverse.?shell",r"bind.?shell",r"privilege.?escalation",r"mimikatz",r"credential.?dump",r"password.?crack",r"ddos",r"botnet",r"ransomware",r"format\s+c:",r"rm\s+-rf\s+/",r"mkfs",r"dd\s+if="]
-SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access"}
+SENSITIVE_TOOLS={"run_shell","run_project_tests","delete_path","uninstall_app","write_file","write_text_file","set_clipboard","save_credential","create_project_structure","kill_process_by_name","block_camera_access","build_project","apply_file_patch"}
 class JagXAgent:
     """Main tool-calling agent for JagX."""
     def __init__(self,config_path="config/settings.yaml"):
@@ -29,8 +30,8 @@ class JagXAgent:
         self.memory=Memory(self.config.get("memory",{}).get("path","./data/memory")); self.messages=[]; self.running=False
         context=self.memory.get_context_summary()
         if context and context!="No long-term memory yet.": self.llm.system_prompt+=f"\n\n### Personal Memory\n{context}"
-        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS}
-        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+AI_TOOLS+AUTOMATION_TOOLS
+        self.tool_functions={**WEB_FUNCS,**SYSTEM_FUNCS,**DESKTOP_FUNCS,**PRIVACY_FUNCS,**EXTRA_FUNCS,**MEDIA_FUNCS,**PRODUCTIVITY_FUNCS,**CREDENTIAL_FUNCS,**DEVELOPER_FUNCS,**CODING_FUNCS,**AI_FUNCS,**AUTOMATION_FUNCS}
+        self.tool_definitions=WEB_TOOLS+SYSTEM_TOOLS+DESKTOP_TOOLS+PRIVACY_TOOLS+EXTRA_TOOLS+MEDIA_TOOLS+PRODUCTIVITY_TOOLS+CREDENTIAL_TOOLS+DEVELOPER_TOOLS+CODING_TOOLS+AI_TOOLS+AUTOMATION_TOOLS
         console.print(f"[bold orange1]JagX initialized[/bold orange1] — {len(self.tool_definitions)} tools loaded — model: {self.llm.model}")
     def _load_config(self,path):
         try:
@@ -49,7 +50,7 @@ class JagXAgent:
         except Exception as e:return f"Tool execution error: {e}"
     def think(self,user_input):
         self.messages.append({"role":"user","content":user_input})
-        for _ in range(12):
+        for _ in range(16):
             response=self.llm.chat(self.messages,tools=self.tool_definitions,tool_choice="auto"); calls=response.get("tool_calls")
             if calls:
                 self.messages.append(response)
