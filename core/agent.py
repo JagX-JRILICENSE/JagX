@@ -85,6 +85,14 @@ try:
     from core.tools.image import IMAGE_TOOLS, TOOL_FUNCTIONS as IMAGE_FUNCS
 except Exception:
     IMAGE_TOOLS, IMAGE_FUNCS = [], {}
+try:
+    from core.tools.vision_privacy import VISION_PRIVACY_TOOLS, TOOL_FUNCTIONS as VISION_PRIVACY_FUNCS
+except Exception:
+    VISION_PRIVACY_TOOLS, VISION_PRIVACY_FUNCS = [], {}
+try:
+    from core.tools.power40 import POWER40_TOOLS, TOOL_FUNCTIONS as POWER40_FUNCS
+except Exception:
+    POWER40_TOOLS, POWER40_FUNCS = [], {}
 
 console = Console()
 
@@ -104,9 +112,8 @@ CONFIRM_TOOLS = {
 
 SHOW_RESULT_TOOLS = {
     "vercel_deploy", "x_click_post_button", "whatsapp_send_message",
-    "github_push", "x_compose_post", "facebook_compose_post",
-    "open_any_url", "open_vercel_dashboard", "generate_image",
-    "build_animated_website",
+    "github_push", "generate_image", "build_animated_website",
+    "capture_webcam_photo", "describe_webcam",
 }
 
 MONEY_BLOCK_PATTERNS = [
@@ -134,13 +141,12 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
     scored.sort(key=lambda x: x[0], reverse=True)
     picked = [d for s, d in scored if s > 0][:cap]
     core_names = {
-        "open_app", "screenshot_and_open", "system_briefing", "open_any_url",
-        "open_x", "open_whatsapp_web", "vercel_deploy", "github_git_status",
-        "generate_image", "build_animated_website", "prepare_stream", "open_obs",
+        "open_app", "screenshot_and_open", "prepare_stream", "open_obs",
+        "generate_image", "build_animated_website", "privacy_guard_scan",
+        "check_ip_reputation", "describe_webcam", "open_obs_youtube_prep",
     }
     core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
-    seen = set()
-    out = []
+    seen, out = set(), []
     for d in core + picked:
         n = (d.get("function") or {}).get("name")
         if n and n not in seen:
@@ -196,13 +202,10 @@ class JagXAgent:
             self.llm.system_prompt += f"\n\n### Personal Memory\n{context}"
 
         self.llm.system_prompt += """
-
 ### AUTONOMOUS MODE
-Act immediately for: stream setup, image generation, website building, games, posts, deploy.
-Tools include: prepare_stream, open_obs, generate_image, build_animated_website, build_portfolio_site.
-
+Stream prep (OBS/YouTube), vision (webcam), privacy scan, IP check, images, websites — act immediately.
 ### FORBIDDEN
-No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
+No bank PIN/card automation, no auto money transfer, no hacking.
 """
 
         self.tool_functions = {
@@ -211,20 +214,19 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
             **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
             **MEGA_FUNCS, **GAME_FUNCS, **STREAMING_FUNCS, **WEB_BUILDER_FUNCS, **IMAGE_FUNCS,
+            **VISION_PRIVACY_FUNCS, **POWER40_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
             POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS +
-            MEGA_TOOLS + GAME_TOOLS + STREAMING_TOOLS + WEB_BUILDER_TOOLS + IMAGE_TOOLS
+            MEGA_TOOLS + GAME_TOOLS + STREAMING_TOOLS + WEB_BUILDER_TOOLS + IMAGE_TOOLS +
+            VISION_PRIVACY_TOOLS + POWER40_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
-        console.print(
-            f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_functions)} "
-            f"model:{self.llm.model} little-brain:{brain}"
-        )
+        console.print(f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_functions)} model:{self.llm.model} little-brain:{brain}")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
@@ -295,9 +297,6 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
             result = f"Tool argument error: {e}"
         except Exception as e:
             result = f"Tool execution error: {e}"
-        if name in {"get_credential", "request_password", "save_credential"}:
-            if result.startswith("SECURE_CREDENTIAL:"):
-                result = "CREDENTIAL_AVAILABLE_LOCALLY"
         result = result + self._auto_show(name)
         if self.on_tool_end:
             try:
@@ -335,51 +334,48 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
         if not user_input:
             return "Tell me what you want me to do."
         if self._is_money_block(user_input):
-            return (
-                "I will not store card/PIN data, auto-transfer money, or place trades automatically.\n"
-                "I can stream-setup, generate images, build websites, deploy, and post."
-            )
+            return "I will not automate bank/card payments. I can stream-setup, privacy-scan, generate images, build sites."
 
         low = user_input.lower().strip()
         slug = "open_" + re.sub(r"[^a-z0-9]+", "_", low.replace("open ", "", 1)).strip("_")
         if low.startswith("open ") and slug in self.tool_functions:
             return f"Done. {self._execute_tool(slug, {})}"
 
-        # Image: "generate image of a jaguar"
-        if low.startswith("generate image") or low.startswith("make an image") or low.startswith("draw "):
-            prompt = re.sub(r"^(generate image( of)?|make an image( of)?|draw)\s*", "", low, flags=re.I).strip()
+        if any(x in low for x in ("privacy scan", "who is using my camera", "check camera", "check mic")):
+            if "privacy_guard_scan" in self.tool_functions:
+                return self._execute_tool("privacy_guard_scan", {})
+        if "check my ip" in low or "ip blacklist" in low or "ip reputation" in low:
+            if "check_ip_reputation" in self.tool_functions:
+                return self._execute_tool("check_ip_reputation", {})
+        if "look at me" in low or "use camera" in low or "what do you see" in low:
+            if "describe_webcam" in self.tool_functions:
+                return self._execute_tool("describe_webcam", {})
+
+        if low.startswith("generate image") or low.startswith("draw "):
+            prompt = re.sub(r"^(generate image( of)?|draw)\s*", "", low, flags=re.I).strip()
             if prompt and "generate_image" in self.tool_functions:
                 return f"Done. {self._execute_tool('generate_image', {'prompt': prompt})}"
 
-        # Website shortcuts
         if "build" in low and "website" in low and "build_animated_website" in self.tool_functions:
             return f"Done. {self._execute_tool('build_animated_website', {'title': 'JagX Site', 'headline': 'Welcome', 'subtitle': user_input})}"
 
-        # Stream shortcuts
-        if low.startswith("stream on ") or low.startswith("prepare stream"):
+        if low.startswith("stream on ") or "youtube live" in low or low.startswith("prepare stream"):
+            if "youtube" in low and "open_obs_youtube_prep" in self.tool_functions:
+                return f"Done. {self._execute_tool('open_obs_youtube_prep', {})}"
             platform = low.replace("stream on ", "").replace("prepare stream", "twitch").strip() or "twitch"
             if "prepare_stream" in self.tool_functions:
                 return f"Done. {self._execute_tool('prepare_stream', {'platform': platform})}"
 
         fast = {
             "open notepad": ("open_app", {"app_name": "notepad"}),
-            "open calculator": ("open_app", {"app_name": "calculator"}),
             "take a screenshot": ("screenshot_and_open", {}),
-            "screenshot": ("screenshot_and_open", {}),
-            "system briefing": ("system_briefing", {}),
-            "open whatsapp": ("open_whatsapp_web", {}),
-            "open x": ("open_x", {}),
             "open obs": ("open_obs", {}),
-            "open steam": ("open_steam", {}),
-            "open 2048": ("open_2048", {}),
+            "privacy scan": ("privacy_guard_scan", {}),
+            "check ip": ("check_ip_reputation", {}),
         }
         if low in fast:
             name, args = fast[low]
             return f"Done. {self._execute_tool(name, args)}"
-
-        m = re.match(r"press ([a-z0-9]+)(?:\s+(\d+)\s*times?)?", low)
-        if m and "game_press_key" in self.tool_functions:
-            return f"Done. {self._execute_tool('game_press_key', {'key': m.group(1), 'times': int(m.group(2) or 1)})}"
 
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
@@ -391,7 +387,7 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
                 response = self.llm.chat(messages=self.messages, tools=tools, tool_choice="auto")
                 content_preview = (response.get("content") or "").lower()
                 if any(x in content_preview for x in ("timed out", "cannot reach ollama", "no local model", "model error")):
-                    return "Main AI unavailable — using Little Brain.\n" + self._little_brain_act(user_input)
+                    return "Main AI unavailable — Little Brain:\n" + self._little_brain_act(user_input)
                 tool_calls = response.get("tool_calls")
                 if tool_calls:
                     self.messages.append(response)
@@ -419,7 +415,6 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
 
     def run(self):
         self.running = True
-        console.print("[green]JagX autonomous mode.[/green]")
         while self.running:
             try:
                 text = input("[You] > ").strip()
