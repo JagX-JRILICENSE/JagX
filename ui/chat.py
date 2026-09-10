@@ -1,20 +1,11 @@
-"""JagX Windows command-center dashboard with reliable typed command execution."""
+"""JagX main window — type-first, fast feedback, auto AI setup."""
 from __future__ import annotations
 
-import platform
 import threading
 import tkinter as tk
-from pathlib import Path
 from tkinter import messagebox, scrolledtext
 
 from core.agent import JagXAgent
-
-try:
-    from core.tools.power import shutdown_windows, sleep_windows, hibernate_windows
-except Exception:
-    def shutdown_windows(): return "unavailable"
-    def sleep_windows(): return "unavailable"
-    def hibernate_windows(): return "unavailable"
 
 try:
     from voice.pipeline import VoicePipeline
@@ -29,6 +20,7 @@ MUTED = "#8b949e"
 ACCENT = "#2f81f7"
 GOOD = "#3fb950"
 WARN = "#d29922"
+SPEAK = "#a371f7"
 
 
 class JagXChat:
@@ -36,23 +28,21 @@ class JagXChat:
         self.agent = agent
         self.agent.gui_mode = True
 
-        # GUI confirmation dialog for sensitive actions
         def _confirm(msg: str) -> bool:
             try:
-                return bool(messagebox.askyesno("JagX confirmation", msg))
+                return bool(messagebox.askyesno("JagX — confirm", msg))
             except Exception:
                 return False
 
         self.agent.confirm_callback = _confirm
 
-        # Live tool status in the UI
         def _tool_start(name: str, args: dict):
-            self.root.after(0, lambda: self._set_status(f"Running {name}…", True))
-            self.root.after(0, lambda: self._append("System", f"→ {name}({args})"))
+            self._set_status(f"Working: {name}", True)
+            self._append("System", f"→ {name}")
 
         def _tool_end(name: str, result: str):
-            short = (result[:180] + "…") if len(result) > 180 else result
-            self.root.after(0, lambda: self._append("System", f"✓ {name}: {short}"))
+            short = result if len(result) < 160 else result[:160] + "…"
+            self._append("System", f"✓ {short}")
 
         self.agent.on_tool_start = _tool_start
         self.agent.on_tool_end = _tool_end
@@ -60,135 +50,105 @@ class JagXChat:
         self.voice = None
         if VoicePipeline is not None:
             try:
-                self.voice = VoicePipeline(
-                    wake_word="jagx",
-                    stt_model_size="base",
-                    tts_voice="en-US-AriaNeural",
-                    language="en",
-                )
+                self.voice = VoicePipeline()
             except Exception:
                 self.voice = None
 
         self.root = tk.Tk()
-        self.root.title("JagX — Windows Command Center")
-        self.root.geometry("1400x900")
-        self.root.minsize(1050, 700)
+        self.root.title("JagX")
+        self.root.geometry("980x720")
+        self.root.minsize(720, 560)
         self._busy = False
         self._build()
-        self._first_run()
-        self._refresh_dashboard()
-        self._start_idle_monitor()
-
-    def _button(self, parent, text, command, width=None):
-        return tk.Button(
-            parent, text=text, command=command, anchor="w", relief="flat", bd=0,
-            bg=CARD, fg=TEXT, activebackground="#273142", activeforeground=TEXT,
-            font=("Segoe UI", 10), padx=12, pady=8, width=width,
+        self._append(
+            "JagX",
+            "Type what you want me to do below, then press Enter.\n"
+            "Examples: open notepad · take a screenshot · open file explorer · move mouse and click",
         )
+        threading.Thread(target=self._startup_ai_check, daemon=True).start()
 
+    # ---------------- UI ----------------
     def _build(self):
         self.root.configure(bg=BG)
-        top = tk.Frame(self.root, bg=PANEL, height=70)
+
+        top = tk.Frame(self.root, bg=PANEL)
         top.pack(fill="x")
-        tk.Label(top, text="🐆 JagX", bg=PANEL, fg=TEXT, font=("Segoe UI", 24, "bold")).pack(side="left", padx=20, pady=12)
-        tk.Label(top, text="WINDOWS COMMAND CENTER", bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(side="left")
-        self.ai_status = tk.Label(top, text="● AI: checking…", bg=PANEL, fg=WARN, font=("Segoe UI", 10, "bold"))
-        self.ai_status.pack(side="right", padx=18)
-        self.status = tk.Label(top, text="● Ready — type a command below", bg=PANEL, fg=GOOD, font=("Segoe UI", 10, "bold"))
-        self.status.pack(side="right", padx=8)
+        tk.Label(top, text="🐆 JagX", bg=PANEL, fg=TEXT, font=("Segoe UI", 22, "bold")).pack(side="left", padx=16, pady=12)
+        self.status = tk.Label(top, text="● Starting…", bg=PANEL, fg=WARN, font=("Segoe UI", 10, "bold"))
+        self.status.pack(side="right", padx=16)
+        self.model_lbl = tk.Label(top, text="", bg=PANEL, fg=MUTED, font=("Segoe UI", 9))
+        self.model_lbl.pack(side="right", padx=8)
 
-        body = tk.Frame(self.root, bg=BG)
-        body.pack(fill="both", expand=True)
+        # Always-visible type box at TOP so user never hunts for it
+        type_frame = tk.Frame(self.root, bg=PANEL)
+        type_frame.pack(fill="x", padx=12, pady=(8, 4))
+        tk.Label(
+            type_frame, text="TYPE HERE", bg=PANEL, fg=ACCENT, font=("Segoe UI", 9, "bold")
+        ).pack(anchor="w", padx=4)
 
-        nav = tk.Frame(body, bg=PANEL, width=220)
-        nav.pack(side="left", fill="y", padx=(10, 6), pady=10)
-        nav.pack_propagate(False)
-        tk.Label(nav, text="QUICK ACTIONS", bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=14, pady=(15, 8))
-
-        quicks = [
-            ("📁 Open Explorer", "Open File Explorer now"),
-            ("🌐 Open Browser", "Open my default web browser"),
-            ("📝 Open Notepad", "Open Notepad"),
-            ("🖱 Mouse position", "Get the current mouse position"),
-            ("📸 Screenshot", "Take a screenshot of my screen"),
-            ("⌨ Type hello", "Click the center of the screen then type Hello from JagX"),
-            ("📷 Camera check", "Check if anything is using my camera or microphone"),
-            ("🧠 What can you do?", "What system actions can you perform for me right now?"),
-        ]
-        for label, prompt in quicks:
-            self._button(nav, label, lambda p=prompt: self.quick(p)).pack(fill="x", padx=8, pady=2)
-
-        tk.Frame(nav, bg=PANEL).pack(fill="both", expand=True)
-        self._button(nav, "🔄 Refresh dashboard", self._refresh_dashboard).pack(fill="x", padx=8, pady=5)
-        if self.voice:
-            self._button(nav, "🎙 Voice (optional)", self.listen).pack(fill="x", padx=8, pady=5)
-
-        content = tk.Frame(body, bg=BG)
-        content.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=10)
-
-        cards = tk.Frame(content, bg=BG)
-        cards.pack(fill="x")
-        self.cpu_card = self._card(cards, "CPU", "—", 0)
-        self.ram_card = self._card(cards, "MEMORY", "—", 1)
-        self.disk_card = self._card(cards, "SYSTEM", platform.system(), 2)
-        self.model_card = self._card(cards, "AI MODEL", getattr(self.agent.llm, "model", "local"), 3)
-
-        # Big chat area for typing commands
-        self._section(content, "TYPE YOUR COMMAND", "Press Enter or click Send — JagX will act on your system")
-        self.chat = scrolledtext.ScrolledText(
-            content, wrap=tk.WORD, bg=PANEL, fg=TEXT, relief="flat", font=("Segoe UI", 11), height=22
-        )
-        self.chat.pack(fill="both", expand=True, pady=(0, 8))
-
-        composer = tk.Frame(content, bg=PANEL)
-        composer.pack(fill="x")
-        self.entry = tk.Entry(composer, bg=CARD, fg=TEXT, insertbackground=TEXT, relief="flat", font=("Segoe UI", 12))
-        self.entry.pack(side="left", fill="x", expand=True, padx=8, pady=10, ipady=10)
+        row = tk.Frame(type_frame, bg=PANEL)
+        row.pack(fill="x", pady=6)
+        self.entry = tk.Entry(row, bg=CARD, fg=TEXT, insertbackground=TEXT, relief="flat", font=("Segoe UI", 13))
+        self.entry.pack(side="left", fill="x", expand=True, ipady=12, padx=(0, 8))
         self.entry.bind("<Return>", lambda _e: self.send())
-        if self.voice:
-            tk.Button(composer, text="🎙", command=self.listen, bg=CARD, fg=TEXT, relief="flat", width=4, font=("Segoe UI", 12)).pack(side="left")
+        self.entry.focus_set()
+
         tk.Button(
-            composer, text="Send / Do it", command=self.send, bg=ACCENT, fg="white",
-            relief="flat", width=12, pady=10, font=("Segoe UI", 11, "bold")
-        ).pack(side="left", padx=8)
+            row, text="Do it", command=self.send, bg=ACCENT, fg="white", relief="flat",
+            font=("Segoe UI", 11, "bold"), padx=16, pady=10,
+        ).pack(side="left")
+        if self.voice:
+            tk.Button(
+                row, text="🎤", command=self.listen, bg=CARD, fg=TEXT, relief="flat",
+                font=("Segoe UI", 12), padx=10, pady=8,
+            ).pack(side="left", padx=(8, 0))
 
-    def _card(self, parent, title, value, column):
-        card = tk.Frame(parent, bg=PANEL, height=90)
-        card.grid(row=0, column=column, sticky="nsew", padx=4)
-        parent.grid_columnconfigure(column, weight=1)
-        tk.Label(card, text=title, bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=14, pady=(12, 2))
-        label = tk.Label(card, text=value, bg=PANEL, fg=TEXT, font=("Segoe UI", 16, "bold"))
-        label.pack(anchor="w", padx=14)
-        return label
+        # Quick action chips
+        chips = tk.Frame(self.root, bg=BG)
+        chips.pack(fill="x", padx=12, pady=4)
+        for label, cmd in [
+            ("Open Notepad", "open notepad"),
+            ("File Explorer", "open file explorer"),
+            ("Screenshot", "take a screenshot"),
+            ("Mouse position", "get the current mouse position"),
+            ("Camera check", "check if anything is using my camera"),
+            ("Fix AI model", "__fix_ai__"),
+        ]:
+            tk.Button(
+                chips, text=label,
+                command=(self.fix_ai if cmd == "__fix_ai__" else lambda c=cmd: self.quick(c)),
+                bg=CARD, fg=TEXT, relief="flat", font=("Segoe UI", 9), padx=10, pady=6,
+            ).pack(side="left", padx=3, pady=3)
 
-    def _section(self, parent, title, subtitle):
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", pady=(0, 5))
-        tk.Label(row, text=title, bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(side="left")
-        tk.Label(row, text=subtitle, bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(side="right")
-
-    def _first_run(self):
-        intro = (
-            "I’m JagX. Type what you want me to do and press Send.\n"
-            "Examples:\n"
-            "• open notepad\n"
-            "• take a screenshot\n"
-            "• move the mouse to the center and click\n"
-            "• open file explorer\n"
-            "• check if anything is using my camera"
+        # Conversation / activity feed
+        mid = tk.Frame(self.root, bg=BG)
+        mid.pack(fill="both", expand=True, padx=12, pady=8)
+        tk.Label(mid, text="ACTIVITY", bg=BG, fg=MUTED, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self.chat = scrolledtext.ScrolledText(
+            mid, wrap=tk.WORD, bg=PANEL, fg=TEXT, relief="flat", font=("Segoe UI", 11), state="disabled"
         )
-        self._append("JagX", intro)
+        self.chat.pack(fill="both", expand=True, pady=(4, 0))
 
-    def _append(self, who, text):
-        self.chat.configure(state="normal")
-        self.chat.insert(tk.END, f"{who}: {text}\n\n")
-        self.chat.configure(state="disabled")
-        self.chat.see(tk.END)
+        # Speaking / progress bar area
+        self.speak_lbl = tk.Label(self.root, text="", bg=BG, fg=SPEAK, font=("Segoe UI", 10, "bold"))
+        self.speak_lbl.pack(fill="x", padx=16, pady=(0, 10))
 
-    def _set_status(self, text, busy=False):
-        self.root.after(0, lambda: self.status.configure(text="● " + text, fg=WARN if busy else GOOD))
+    def _append(self, who: str, text: str):
+        def _do():
+            self.chat.configure(state="normal")
+            self.chat.insert(tk.END, f"{who}: {text}\n\n")
+            self.chat.configure(state="disabled")
+            self.chat.see(tk.END)
+        self.root.after(0, _do)
 
-    def quick(self, text):
+    def _set_status(self, text: str, busy: bool = False):
+        color = WARN if busy else GOOD
+        self.root.after(0, lambda: self.status.configure(text="● " + text, fg=color))
+
+    def _set_speaking(self, text: str):
+        self.root.after(0, lambda: self.speak_lbl.configure(text=text))
+
+    def quick(self, text: str):
         self.entry.delete(0, tk.END)
         self.entry.insert(0, text)
         self.send()
@@ -200,28 +160,39 @@ class JagXChat:
         self.entry.delete(0, tk.END)
         self._append("You", text)
         self._busy = True
-        self._set_status("Working…", True)
+        self._set_status("Thinking…", True)
+        self._set_speaking("")
         threading.Thread(target=self._think, args=(text,), daemon=True).start()
 
-    def _think(self, text):
+    def _think(self, text: str):
         try:
+            # Lightweight plan line for user visibility
+            self._append("JagX", f"Got it: “{text}”. Working on it…")
             response = self.agent.think(text)
         except Exception as exc:
-            response = f"Sorry, something went wrong: {exc}"
-        self.root.after(0, lambda: self._append("JagX", response))
+            response = f"Something went wrong: {exc}"
+
+        self._append("JagX", response)
         self._busy = False
         self._set_status("Ready — type next command")
-        if self.voice:
+
+        if self.voice and response:
+            self._set_speaking("🔊 Speaking…")
             try:
-                threading.Thread(target=self.voice.speak, args=(response,), daemon=True).start()
+                self.voice.speak(response)
             except Exception:
                 pass
+            self._set_speaking("")
 
     def listen(self):
-        if not self.voice or self._busy:
-            self._append("JagX", "Voice is unavailable. Please type your command.")
+        if not self.voice:
+            self._append("JagX", "Microphone/voice is unavailable. Please type in the box above.")
+            self.entry.focus_set()
+            return
+        if self._busy:
             return
         self._set_status("Listening…", True)
+        self._set_speaking("🎤 Listening — speak now")
         threading.Thread(target=self._listen_worker, daemon=True).start()
 
     def _listen_worker(self):
@@ -229,69 +200,70 @@ class JagXChat:
             text = self.voice.listen_once()
         except Exception:
             text = ""
+        self._set_speaking("")
         if not text:
-            self.root.after(0, lambda: self._append("JagX", "I didn't catch that. Please type instead."))
-            self._set_status("Type your request")
+            self._append("JagX", "I didn’t catch that. Type here instead ↓")
+            self._set_status("Type your command")
             self.root.after(0, self.entry.focus_set)
             return
         self.root.after(0, lambda: (self.entry.delete(0, tk.END), self.entry.insert(0, text), self.send()))
 
-    def _refresh_dashboard(self):
+    def _startup_ai_check(self):
+        self._set_status("Checking local AI…", True)
+        try:
+            st = self.agent.llm.status()
+            model = st.get("model") or getattr(self.agent.llm, "model", "?")
+            self.root.after(0, lambda: self.model_lbl.configure(text=f"Model: {model}"))
+            if st.get("reachable"):
+                self._set_status("Ready — type a command")
+                # Warn if coder-tiny model
+                if model and "coder" in str(model).lower() and "1.5b" in str(model).lower():
+                    self._append(
+                        "JagX",
+                        "Your current model is very small (coder 1.5b) and times out easily.\n"
+                        "Click **Fix AI model** to install a faster chat model automatically.",
+                    )
+            else:
+                self._set_status("AI not ready", True)
+                self._append("JagX", st.get("error") or "Ollama not reachable. Click Fix AI model.")
+        except Exception as e:
+            self._set_status("AI check failed", True)
+            self._append("JagX", str(e))
+
+    def fix_ai(self):
+        if self._busy:
+            return
+        self._busy = True
+        self._set_status("Installing AI model…", True)
+        self._append("JagX", "Installing a fast local model (qwen2.5:3b). Please wait…")
+
         def worker():
-            cpu = ram = "—"
-            try:
-                import psutil
-                cpu = f"{psutil.cpu_percent(interval=0.3):.0f}%"
-                ram = f"{psutil.virtual_memory().percent:.0f}%"
-            except Exception:
-                pass
-            self.root.after(0, lambda: self.cpu_card.configure(text=cpu))
-            self.root.after(0, lambda: self.ram_card.configure(text=ram))
-            self.root.after(0, self._refresh_ai_status)
+            from core.setup_ai import ensure_local_ai
+
+            def progress(msg: str):
+                self._set_status(msg[:60], True)
+                self._append("Setup", msg)
+
+            result = ensure_local_ai(
+                base_url=getattr(self.agent.llm, "base_url", "http://127.0.0.1:11434"),
+                preferred_model="qwen2.5:3b",
+                auto_pull=True,
+                on_progress=progress,
+            )
+            if result.get("ok") and result.get("model"):
+                self.agent.llm.model = result["model"]
+                self.agent.llm.available_models = result.get("available") or []
+                self.root.after(0, lambda: self.model_lbl.configure(text=f"Model: {result['model']}"))
+                self._append("JagX", f"AI ready with {result['model']}. Try: open notepad")
+                self._set_status("Ready — type a command")
+            else:
+                self._append("JagX", result.get("message") or "Could not install model.")
+                self._set_status("AI setup failed", True)
+            self._busy = False
+
         threading.Thread(target=worker, daemon=True).start()
 
-    def _refresh_ai_status(self):
-        try:
-            model = getattr(getattr(self.agent, "llm", None), "model", "local")
-            self.model_card.configure(text=str(model))
-            self.ai_status.configure(text=f"● AI: {model}", fg=GOOD)
-        except Exception:
-            self.ai_status.configure(text="● AI: check Ollama", fg=WARN)
-
-    def _start_idle_monitor(self):
-        policy = self.agent.config.get("idle_power", {})
-        if not policy.get("enabled", False):
-            return
-        self._idle_check()
-
-    def _idle_check(self):
-        policy = self.agent.config.get("idle_power", {})
-        if not policy.get("enabled", False):
-            return
-        try:
-            import ctypes
-
-            class LI(ctypes.Structure):
-                _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
-
-            li = LI()
-            li.cbSize = ctypes.sizeof(LI)
-            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(li))
-            idle = (ctypes.windll.kernel32.GetTickCount() - li.dwTime) / 1000
-            limit = int(policy.get("timeout_minutes", 30)) * 60
-            if idle >= limit and not self._busy:
-                action = str(policy.get("action", "sleep")).lower()
-                self._append("JagX", f"Idle timeout — starting {action}.")
-                fn = {"sleep": sleep_windows, "hibernate": hibernate_windows, "shutdown": shutdown_windows}.get(action)
-                if fn:
-                    fn()
-                return
-        except Exception:
-            pass
-        self.root.after(15000, self._idle_check)
-
     def run(self):
-        self.entry.focus_set()
         self.root.mainloop()
 
 
