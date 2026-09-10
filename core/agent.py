@@ -1,4 +1,4 @@
-"""JagX Agent — tools + Little Brain + hard safety limits."""
+"""JagX Agent — autonomous on your PC; only hard-blocks money/hacking."""
 from __future__ import annotations
 
 import json
@@ -76,16 +76,20 @@ HIGH_RISK_PATTERNS = [
     r"format\s+c:", r"rm\s+-rf\s+/", r"mkfs", r"dd\s+if=",
 ]
 
-DESTRUCTIVE_TOOLS = {
-    "delete_path", "uninstall_app", "run_shell",
+# Only truly dangerous / irreversible system ops need a prompt
+CONFIRM_TOOLS = {
+    "delete_path", "uninstall_app",
     "shutdown_windows", "restart_windows", "empty_recycle_bin",
-    "block_camera_access", "kill_process_by_name", "kill_process",
-    "save_credential", "get_credential", "delete_credential",
-    "clean_temp_files", "github_push", "github_commit_all",
-    "x_click_post_button", "whatsapp_send_message", "vercel_deploy",
+    "format_drive", "wipe_disk",
 }
 
-# Money / card / auto-trade — never automate
+# Auto-screenshot after these so user sees result without blocking
+SHOW_RESULT_TOOLS = {
+    "vercel_deploy", "x_click_post_button", "whatsapp_send_message",
+    "github_push", "x_compose_post", "facebook_compose_post",
+    "open_any_url", "open_vercel_dashboard",
+}
+
 MONEY_BLOCK_PATTERNS = [
     r"\btransfer money\b", r"\bsend money\b", r"\bbank transfer\b",
     r"\bwire transfer\b", r"\benter (my )?pin\b", r"\baccount (number|no)\b",
@@ -105,6 +109,7 @@ class JagXAgent:
         self.messages: List[Dict[str, Any]] = []
         self.running = False
         self.gui_mode = False
+        self.autonomous = True  # post / deploy / code without nagging
         self.on_tool_start: Optional[Callable[[str, dict], None]] = None
         self.on_tool_end: Optional[Callable[[str, str], None]] = None
         self.confirm_callback: Optional[Callable[[str], bool]] = None
@@ -136,18 +141,19 @@ class JagXAgent:
 
         self.llm.system_prompt += """
 
-### CAPABILITIES
-- Desktop control, files, apps
-- Social: open X/Facebook/WhatsApp Web, draft posts, reply (confirm before send)
-- Passwords: save site logins via save_credential_interactive (not bank/card)
-- GitHub: status, commit, push, PR via gh CLI when installed
-- Vercel: deploy via CLI when logged in; open dashboard
-- Domains: open registrar; user pays themselves
+### AUTONOMOUS MODE (this is the user's PC)
+When the user asks to post, reply, deploy, edit code, or push — DO IT.
+Do NOT ask for confirmation on normal social posts, WhatsApp sends, Vercel deploy, or git push.
+Just act, then briefly report what you did.
+For Vercel/code work: say what you are changing, run tools, then take a screenshot so they can see the result.
 
-### HARD LIMITS
-- No bank PIN, card number, CVV storage or auto-fill
-- No automated money transfers or auto-trading orders
-- Confirm before public posts, WhatsApp send, git push, vercel prod deploy
+### STILL FORBIDDEN
+- Bank PIN / card / CVV storage or auto-pay
+- Automatic money transfers or auto-trading orders
+- Hacking tools / malware
+
+### STYLE
+Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploying to Vercel…").
 """
 
         self.tool_functions = {
@@ -164,7 +170,7 @@ class JagXAgent:
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
-        console.print(f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_definitions)} model:{self.llm.model} little-brain:{brain}")
+        console.print(f"[bold orange1]JagX ready[/bold orange1] — autonomous tools:{len(self.tool_definitions)} model:{self.llm.model} little-brain:{brain}")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
@@ -177,14 +183,17 @@ class JagXAgent:
         low = (text or "").lower()
         return any(re.search(p, low, re.I) for p in MONEY_BLOCK_PATTERNS)
 
-    def _is_high_risk(self, name: str, arguments: Dict[str, Any]) -> bool:
-        if name in DESTRUCTIVE_TOOLS:
-            if name == "run_shell":
-                cmd = str(arguments.get("command", "")).lower()
-                safe_prefixes = ("start ", "explorer", "notepad", "calc", "mspaint", "dir", "cd ", "type ", "echo ")
-                if any(cmd.strip().startswith(p) for p in safe_prefixes):
-                    return False
+    def _needs_confirm(self, name: str, arguments: Dict[str, Any]) -> bool:
+        if not self.autonomous:
+            return name in CONFIRM_TOOLS or name == "run_shell"
+        if name in CONFIRM_TOOLS:
             return True
+        if name == "run_shell":
+            cmd = str(arguments.get("command", "")).lower()
+            # Dangerous shell only
+            if any(x in cmd for x in ("format ", "diskpart", "rm -rf /", "mkfs", "del /f /s /q")):
+                return True
+            return False
         blob = (name + " " + json.dumps(arguments)).lower()
         return any(re.search(p, blob, re.I) for p in HIGH_RISK_PATTERNS)
 
@@ -202,6 +211,19 @@ class JagXAgent:
         except Exception:
             return False
 
+    def _auto_show(self, name: str) -> str:
+        """Take a screenshot after key actions so the user sees the result."""
+        if name not in SHOW_RESULT_TOOLS:
+            return ""
+        shot = self.tool_functions.get("screenshot_and_open")
+        if not shot:
+            return ""
+        try:
+            path = shot()
+            return f"\n[Preview] {path}"
+        except Exception:
+            return ""
+
     def _execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
         func = self.tool_functions.get(name)
         if not func:
@@ -212,7 +234,7 @@ class JagXAgent:
             if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
                 return "Refused: banking/card secrets are not stored or auto-filled."
 
-        if self._is_high_risk(name, arguments):
+        if self._needs_confirm(name, arguments):
             if not self._ask_confirm(f"Allow sensitive action {name}?"):
                 return "Action cancelled by user."
 
@@ -234,6 +256,9 @@ class JagXAgent:
                 result = "CREDENTIAL_AVAILABLE_LOCALLY"
             elif name == "request_password" and not result.startswith("PASSWORD_INPUT_"):
                 result = "PASSWORD_RECEIVED_LOCALLY"
+
+        # Show screen after deploy/post so user sees outcome without extra asks
+        result = result + self._auto_show(name)
 
         if self.on_tool_end:
             try:
@@ -273,13 +298,8 @@ class JagXAgent:
 
         if self._is_money_block(user_input):
             return (
-                "I will **not** store card/PIN data, auto-transfer money, auto-buy domains with your card, "
-                "or place trades automatically.\n\n"
-                "What I *can* do:\n"
-                "• Open your bank / exchange / domain site so **you** complete payment\n"
-                "• Help research ideas to make money (content, products, freelancing)\n"
-                "• Deploy sites (Vercel) and improve GitHub code\n"
-                "• Post/reply on your social apps after you confirm"
+                "I will not store card/PIN data, auto-transfer money, or place trades automatically.\n"
+                "I can open the site for you, improve code, deploy to Vercel, and post on your socials without asking each time."
             )
 
         low = user_input.lower().strip()
@@ -307,7 +327,7 @@ class JagXAgent:
             self.messages = self.messages[-30:]
 
         try:
-            for _ in range(10):
+            for _ in range(12):
                 response = self.llm.chat(
                     messages=self.messages,
                     tools=self.tool_definitions,
@@ -346,7 +366,7 @@ class JagXAgent:
 
     def run(self):
         self.running = True
-        console.print("[green]JagX text mode.[/green]")
+        console.print("[green]JagX autonomous mode.[/green]")
         while self.running:
             try:
                 text = input("[You] > ").strip()
