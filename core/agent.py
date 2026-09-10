@@ -65,6 +65,10 @@ try:
     from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
 except Exception:
     DEVELOPER_TOOLS, DEVELOPER_FUNCS = [], {}
+try:
+    from core.tools.mega_features import MEGA_TOOLS, TOOL_FUNCTIONS as MEGA_FUNCS
+except Exception:
+    MEGA_TOOLS, MEGA_FUNCS = [], {}
 
 console = Console()
 
@@ -76,14 +80,12 @@ HIGH_RISK_PATTERNS = [
     r"format\s+c:", r"rm\s+-rf\s+/", r"mkfs", r"dd\s+if=",
 ]
 
-# Only truly dangerous / irreversible system ops need a prompt
 CONFIRM_TOOLS = {
     "delete_path", "uninstall_app",
     "shutdown_windows", "restart_windows", "empty_recycle_bin",
     "format_drive", "wipe_disk",
 }
 
-# Auto-screenshot after these so user sees result without blocking
 SHOW_RESULT_TOOLS = {
     "vercel_deploy", "x_click_post_button", "whatsapp_send_message",
     "github_push", "x_compose_post", "facebook_compose_post",
@@ -101,6 +103,45 @@ MONEY_BLOCK_PATTERNS = [
 ]
 
 
+def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[dict]:
+    """Keep the LLM fast: send core tools + mega tools that match the request."""
+    low = (user_text or "").lower()
+    tokens = set(re.findall(r"[a-z0-9]+", low))
+    scored = []
+    for d in all_defs:
+        fn = (d.get("function") or {})
+        name = (fn.get("name") or "").lower()
+        desc = (fn.get("description") or "").lower()
+        blob = name + " " + desc
+        score = sum(1 for t in tokens if t in blob and len(t) > 2)
+        scored.append((score, d))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    picked = [d for s, d in scored if s > 0][:cap]
+    # Always keep a small core set first
+    core_names = {
+        "open_app", "screenshot_and_open", "system_briefing", "open_any_url",
+        "open_x", "open_whatsapp_web", "vercel_deploy", "github_git_status",
+        "add_note", "add_task", "list_tasks",
+    }
+    core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
+    seen = set()
+    out = []
+    for d in core + picked:
+        n = (d.get("function") or {}).get("name")
+        if n and n not in seen:
+            seen.add(n)
+            out.append(d)
+    if len(out) < 24:
+        for d in all_defs:
+            n = (d.get("function") or {}).get("name")
+            if n and n not in seen:
+                seen.add(n)
+                out.append(d)
+            if len(out) >= 24:
+                break
+    return out
+
+
 class JagXAgent:
     def __init__(self, config_path: str = "config/settings.yaml"):
         self.config = self._load_config(config_path)
@@ -109,7 +150,7 @@ class JagXAgent:
         self.messages: List[Dict[str, Any]] = []
         self.running = False
         self.gui_mode = False
-        self.autonomous = True  # post / deploy / code without nagging
+        self.autonomous = True
         self.on_tool_start: Optional[Callable[[str, dict], None]] = None
         self.on_tool_end: Optional[Callable[[str, str], None]] = None
         self.confirm_callback: Optional[Callable[[str], bool]] = None
@@ -141,19 +182,12 @@ class JagXAgent:
 
         self.llm.system_prompt += """
 
-### AUTONOMOUS MODE (this is the user's PC)
-When the user asks to post, reply, deploy, edit code, or push — DO IT.
-Do NOT ask for confirmation on normal social posts, WhatsApp sends, Vercel deploy, or git push.
-Just act, then briefly report what you did.
-For Vercel/code work: say what you are changing, run tools, then take a screenshot so they can see the result.
+### AUTONOMOUS MODE
+Do posts, replies, deploys, code edits, and app/site opens without asking.
+Use matching tools. After deploy/post, a screenshot may open automatically.
 
-### STILL FORBIDDEN
-- Bank PIN / card / CVV storage or auto-pay
-- Automatic money transfers or auto-trading orders
-- Hacking tools / malware
-
-### STYLE
-Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploying to Vercel…").
+### FORBIDDEN
+No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
 """
 
         self.tool_functions = {
@@ -161,16 +195,21 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
             **CREDENTIAL_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **BROWSER_FUNCS,
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
             **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
+            **MEGA_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
-            POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS
+            POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS +
+            MEGA_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
-        console.print(f"[bold orange1]JagX ready[/bold orange1] — autonomous tools:{len(self.tool_definitions)} model:{self.llm.model} little-brain:{brain}")
+        console.print(
+            f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_functions)} "
+            f"model:{self.llm.model} little-brain:{brain}"
+        )
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
@@ -184,13 +223,10 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
         return any(re.search(p, low, re.I) for p in MONEY_BLOCK_PATTERNS)
 
     def _needs_confirm(self, name: str, arguments: Dict[str, Any]) -> bool:
-        if not self.autonomous:
-            return name in CONFIRM_TOOLS or name == "run_shell"
         if name in CONFIRM_TOOLS:
             return True
         if name == "run_shell":
             cmd = str(arguments.get("command", "")).lower()
-            # Dangerous shell only
             if any(x in cmd for x in ("format ", "diskpart", "rm -rf /", "mkfs", "del /f /s /q")):
                 return True
             return False
@@ -212,15 +248,13 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
             return False
 
     def _auto_show(self, name: str) -> str:
-        """Take a screenshot after key actions so the user sees the result."""
         if name not in SHOW_RESULT_TOOLS:
             return ""
         shot = self.tool_functions.get("screenshot_and_open")
         if not shot:
             return ""
         try:
-            path = shot()
-            return f"\n[Preview] {path}"
+            return f"\n[Preview] {shot()}"
         except Exception:
             return ""
 
@@ -228,38 +262,28 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
         func = self.tool_functions.get(name)
         if not func:
             return f"Unknown tool: {name}"
-
         if name in {"save_credential", "save_credential_interactive", "get_credential"}:
             account = str(arguments.get("account", "")).lower()
             if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
                 return "Refused: banking/card secrets are not stored or auto-filled."
-
         if self._needs_confirm(name, arguments):
             if not self._ask_confirm(f"Allow sensitive action {name}?"):
                 return "Action cancelled by user."
-
         if self.on_tool_start:
             try:
                 self.on_tool_start(name, arguments)
             except Exception:
                 pass
-
         try:
             result = str(func(**arguments))
         except TypeError as e:
             result = f"Tool argument error: {e}"
         except Exception as e:
             result = f"Tool execution error: {e}"
-
         if name in {"get_credential", "request_password", "save_credential"}:
             if result.startswith("SECURE_CREDENTIAL:"):
                 result = "CREDENTIAL_AVAILABLE_LOCALLY"
-            elif name == "request_password" and not result.startswith("PASSWORD_INPUT_"):
-                result = "PASSWORD_RECEIVED_LOCALLY"
-
-        # Show screen after deploy/post so user sees outcome without extra asks
         result = result + self._auto_show(name)
-
         if self.on_tool_end:
             try:
                 self.on_tool_end(name, result)
@@ -295,27 +319,27 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
         user_input = (user_input or "").strip()
         if not user_input:
             return "Tell me what you want me to do."
-
         if self._is_money_block(user_input):
             return (
                 "I will not store card/PIN data, auto-transfer money, or place trades automatically.\n"
-                "I can open the site for you, improve code, deploy to Vercel, and post on your socials without asking each time."
+                "I can open the site, improve code, deploy, and post on your socials."
             )
 
         low = user_input.lower().strip()
+        # Direct tool by spoken name: "open figma", "open task manager"
+        slug = "open_" + re.sub(r"[^a-z0-9]+", "_", low.replace("open ", "", 1)).strip("_")
+        if low.startswith("open ") and slug in self.tool_functions:
+            return f"Done. {self._execute_tool(slug, {})}"
+
         fast = {
             "open notepad": ("open_app", {"app_name": "notepad"}),
             "open calculator": ("open_app", {"app_name": "calculator"}),
             "open file explorer": ("open_app", {"app_name": "explorer"}),
-            "open explorer": ("open_app", {"app_name": "explorer"}),
             "take a screenshot": ("screenshot_and_open", {}),
             "screenshot": ("screenshot_and_open", {}),
             "system briefing": ("system_briefing", {}),
             "organize downloads": ("organize_downloads", {}),
-            "clean temp": ("clean_temp_files", {}),
-            "mute": ("volume_mute_toggle", {}),
             "open whatsapp": ("open_whatsapp_web", {}),
-            "open twitter": ("open_x", {}),
             "open x": ("open_x", {}),
         }
         if low in fast:
@@ -326,17 +350,13 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
         if len(self.messages) > 40:
             self.messages = self.messages[-30:]
 
+        tools = _select_tools(self.tool_definitions, user_input)
         try:
             for _ in range(12):
-                response = self.llm.chat(
-                    messages=self.messages,
-                    tools=self.tool_definitions,
-                    tool_choice="auto",
-                )
+                response = self.llm.chat(messages=self.messages, tools=tools, tool_choice="auto")
                 content_preview = (response.get("content") or "").lower()
                 if any(x in content_preview for x in ("timed out", "cannot reach ollama", "no local model", "model error")):
                     return "Main AI unavailable — using Little Brain.\n" + self._little_brain_act(user_input)
-
                 tool_calls = response.get("tool_calls")
                 if tool_calls:
                     self.messages.append(response)
@@ -355,13 +375,11 @@ Be direct. Prefer tools over chat. Show progress in one short line (e.g. "Deploy
                             "content": result,
                         })
                     continue
-
                 content = (response.get("content") or "").strip()
                 self.messages.append({"role": "assistant", "content": content})
                 return content or "Done."
         except Exception as e:
             return f"Main AI error ({e}). Little Brain:\n" + self._little_brain_act(user_input)
-
         return self._little_brain_act(user_input)
 
     def run(self):
