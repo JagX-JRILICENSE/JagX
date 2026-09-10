@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 JagX — Premium Personal Jaguar AI
-Live desktop companion + tray + command center + local AI.
 JRILICENSE
 """
 from __future__ import annotations
@@ -37,21 +36,30 @@ def bootstrap_ai(agent, on_progress=None):
 
         result = ensure_local_ai(
             base_url=getattr(agent.llm, "base_url", "http://127.0.0.1:11434"),
-            preferred_model=getattr(agent.llm, "model", "qwen2.5:3b"),
+            preferred_model="qwen2.5:3b",
             auto_pull=True,
             auto_install_ollama=True,
+            specialize=False,
             on_progress=on_progress,
         )
         if result.get("ok") and result.get("model"):
             agent.llm.model = result["model"]
             agent.llm.available_models = result.get("available") or []
+            # Force 3b when present
+            for m in agent.llm.available_models:
+                if "qwen2.5:3b" in m.lower() and "coder" not in m.lower():
+                    agent.llm.model = m
+                    break
+            try:
+                agent.llm.warm_up()
+            except Exception:
+                pass
         return result
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 def run_premium(agent):
-    """Full premium experience: walking jaguar + tray + main window."""
     from ui.tray import JagXTray
     from ui.chat import JagXChat
     from ui.companion import JaguarCompanion
@@ -70,10 +78,13 @@ def run_premium(agent):
         pet = state.get("pet")
         tray = state.get("tray")
         if pet:
-            pet.say(text[:40], seconds=min(6, max(2, len(text) // 12)))
-        if tray:
-            tray.set_talking(True)
             try:
+                pet.say(text[:40], seconds=min(6, max(2, len(text) // 12)))
+            except Exception:
+                pass
+        if tray:
+            try:
+                tray.set_talking(True)
                 tray.notify("JagX", text[:120])
             except Exception:
                 pass
@@ -81,9 +92,17 @@ def run_premium(agent):
             try:
                 voice.speak(text)
             except Exception:
-                pass
+                try:
+                    from voice.tts import speak as tts_speak
+
+                    tts_speak(text)
+                except Exception:
+                    pass
         if tray:
-            tray.set_talking(False)
+            try:
+                tray.set_talking(False)
+            except Exception:
+                pass
 
     def open_window():
         ui = state.get("ui")
@@ -94,9 +113,25 @@ def run_premium(agent):
                 ui.root.focus_force()
             except Exception:
                 pass
-        pet = state.get("pet")
-        if pet:
-            pet.say("Opening…", seconds=1.5)
+
+    def run_command(text: str):
+        """From jaguar head type box."""
+        ui = state.get("ui")
+        if ui:
+            try:
+                ui.entry.delete(0, "end")
+                ui.entry.insert(0, text)
+                ui.send()
+                open_window()
+                return
+            except Exception:
+                pass
+        # Fallback direct
+        try:
+            result = agent.think(text)
+            speak(result[:200] if result else "Done")
+        except Exception as e:
+            speak(str(e)[:120])
 
     def on_quit():
         try:
@@ -119,34 +154,30 @@ def run_premium(agent):
                 pass
         sys.exit(0)
 
-    # Tray jaguar (notification area)
     tray = JagXTray(
         on_open=open_window,
         on_type=open_window,
-        on_voice_toggle=lambda: speak("Use the mic button in the window, or just type."),
+        on_voice_toggle=lambda: speak("Type a command in the box or use the mic button."),
         on_quit=on_quit,
     )
     state["tray"] = tray
     tray.start()
 
-    # AI bootstrap in background
     def ai_job():
         result = bootstrap_ai(agent, on_progress=lambda m: console.print(f"[dim]{m}[/dim]"))
         msg = result.get("message") or "Ready"
-        speak(f"JagX online. {msg}")
+        model = getattr(agent.llm, "model", "?")
+        speak(f"JagX online with {model}")
 
     threading.Thread(target=ai_job, daemon=True).start()
 
-    # Main window
     ui = JagXChat(agent)
     state["ui"] = ui
 
-    # Live walking companion on the desktop (same Tk app)
-    pet = JaguarCompanion(on_click=open_window, on_double_click=open_window)
+    pet = JaguarCompanion(on_click=open_window, on_double_click=open_window, on_command=run_command)
     pet.start(master=ui.root)
     state["pet"] = pet
 
-    # Hook agent tool success → jaguar celebrates
     old_end = agent.on_tool_end
 
     def tool_end(name, result):
@@ -167,9 +198,7 @@ def run_premium(agent):
         try:
             ui.root.withdraw()
             if pet:
-                pet.say("I'm still here", seconds=2)
-            if tray:
-                tray.notify("JagX", "Jaguar is still on your desktop. Click it anytime.")
+                pet.say("Still here", seconds=2)
         except Exception:
             on_quit()
 
@@ -178,13 +207,13 @@ def run_premium(agent):
     except Exception:
         pass
 
-    # Premium first line in chat
     try:
         ui._append(
             "JagX",
-            "I'm on your desktop now — the walking jaguar.\n"
-            "Click the jaguar anytime, or type a command above.\n"
-            "Try: open notepad · take a screenshot · system briefing",
+            "Ready.\n"
+            "• Type in the main box OR in the box on the jaguar's head\n"
+            "• Try: open notepad · take a screenshot · quick virus scan\n"
+            "• Model should show qwen2.5:3b after Ollama is running",
         )
     except Exception:
         pass
@@ -202,12 +231,10 @@ def main():
 
     agent = JagXAgent()
 
-    if args.mode in ("premium", "gui"):
+    if args.mode in ("premium", "gui", "voice"):
         run_premium(agent)
-    elif args.mode == "text":
-        agent.run()
     else:
-        run_premium(agent)
+        agent.run()
 
 
 if __name__ == "__main__":
