@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-JagX — Personal Jaguar AI Companion
-Premium always-on Windows experience: tray jaguar + chat + voice.
+JagX — Premium Personal Jaguar AI
+Live desktop companion + tray + command center + local AI.
 JRILICENSE
 """
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -25,7 +24,7 @@ def print_banner():
     console.print(
         Panel.fit(
             "[bold orange1]🐆  JagX[/bold orange1]\n"
-            "[dim]Personal Jaguar AI Companion[/dim]\n"
+            "[dim]Premium Personal Jaguar AI[/dim]\n"
             "[yellow]JRILICENSE[/yellow]",
             border_style="orange1",
         )
@@ -33,7 +32,6 @@ def print_banner():
 
 
 def bootstrap_ai(agent, on_progress=None):
-    """Make local AI ready as soon as the app starts."""
     try:
         from core.setup_ai import ensure_local_ai
 
@@ -53,9 +51,10 @@ def bootstrap_ai(agent, on_progress=None):
 
 
 def run_premium(agent):
-    """Default mode: jaguar tray + main window + optional voice."""
+    """Full premium experience: walking jaguar + tray + main window."""
     from ui.tray import JagXTray
     from ui.chat import JagXChat
+    from ui.companion import JaguarCompanion
 
     voice = None
     try:
@@ -65,14 +64,19 @@ def run_premium(agent):
     except Exception:
         voice = None
 
-    tray_holder = {"tray": None}
-    chat_holder = {"ui": None}
+    state = {"tray": None, "ui": None, "pet": None}
 
     def speak(text: str):
-        tray = tray_holder.get("tray")
+        pet = state.get("pet")
+        tray = state.get("tray")
+        if pet:
+            pet.say(text[:40], seconds=min(6, max(2, len(text) // 12)))
         if tray:
             tray.set_talking(True)
-            tray.notify("JagX", text[:120])
+            try:
+                tray.notify("JagX", text[:120])
+            except Exception:
+                pass
         if voice:
             try:
                 voice.speak(text)
@@ -82,7 +86,7 @@ def run_premium(agent):
             tray.set_talking(False)
 
     def open_window():
-        ui = chat_holder.get("ui")
+        ui = state.get("ui")
         if ui and getattr(ui, "root", None):
             try:
                 ui.root.deiconify()
@@ -90,6 +94,9 @@ def run_premium(agent):
                 ui.root.focus_force()
             except Exception:
                 pass
+        pet = state.get("pet")
+        if pet:
+            pet.say("Opening…", seconds=1.5)
 
     def on_quit():
         try:
@@ -97,10 +104,14 @@ def run_premium(agent):
                 voice.stop()
         except Exception:
             pass
-        tray = tray_holder.get("tray")
-        if tray:
-            tray.stop()
-        ui = chat_holder.get("ui")
+        for key in ("pet", "tray"):
+            obj = state.get(key)
+            if obj:
+                try:
+                    obj.stop()
+                except Exception:
+                    pass
+        ui = state.get("ui")
         if ui and getattr(ui, "root", None):
             try:
                 ui.root.destroy()
@@ -108,42 +119,57 @@ def run_premium(agent):
                 pass
         sys.exit(0)
 
-    def toggle_voice():
-        speak("Voice toggle is available from the main window microphone button.")
-
-    # Start tray jaguar first so user always sees the animal
+    # Tray jaguar (notification area)
     tray = JagXTray(
         on_open=open_window,
         on_type=open_window,
-        on_voice_toggle=toggle_voice,
+        on_voice_toggle=lambda: speak("Use the mic button in the window, or just type."),
         on_quit=on_quit,
     )
-    tray_holder["tray"] = tray
-    tray_ok = tray.start()
-    if tray_ok:
-        tray.notify("JagX", "Jaguar is online. Click the orange icon anytime.")
+    state["tray"] = tray
+    tray.start()
 
-    # Prepare AI in background while UI loads
+    # AI bootstrap in background
     def ai_job():
-        def prog(msg):
-            console.print(f"[dim]{msg}[/dim]")
-
-        result = bootstrap_ai(agent, on_progress=prog)
-        msg = result.get("message") or ("AI ready" if result.get("ok") else "AI needs setup")
+        result = bootstrap_ai(agent, on_progress=lambda m: console.print(f"[dim]{m}[/dim]"))
+        msg = result.get("message") or "Ready"
         speak(f"JagX online. {msg}")
 
     threading.Thread(target=ai_job, daemon=True).start()
 
-    # Main premium window (blocks until closed)
+    # Main window
     ui = JagXChat(agent)
-    chat_holder["ui"] = ui
+    state["ui"] = ui
 
-    # When window is closed, hide to tray instead of full quit
+    # Live walking companion on the desktop (same Tk app)
+    pet = JaguarCompanion(on_click=open_window, on_double_click=open_window)
+    pet.start(master=ui.root)
+    state["pet"] = pet
+
+    # Hook agent tool success → jaguar celebrates
+    old_end = agent.on_tool_end
+
+    def tool_end(name, result):
+        if old_end:
+            try:
+                old_end(name, result)
+            except Exception:
+                pass
+        if pet and not str(result).lower().startswith("error"):
+            try:
+                pet.celebrate()
+            except Exception:
+                pass
+
+    agent.on_tool_end = tool_end
+
     def hide_to_tray():
         try:
             ui.root.withdraw()
-            if tray_holder.get("tray"):
-                tray_holder["tray"].notify("JagX", "Still running in the system tray. Click the jaguar to open.")
+            if pet:
+                pet.say("I'm still here", seconds=2)
+            if tray:
+                tray.notify("JagX", "Jaguar is still on your desktop. Click it anytime.")
         except Exception:
             on_quit()
 
@@ -152,17 +178,23 @@ def run_premium(agent):
     except Exception:
         pass
 
+    # Premium first line in chat
+    try:
+        ui._append(
+            "JagX",
+            "I'm on your desktop now — the walking jaguar.\n"
+            "Click the jaguar anytime, or type a command above.\n"
+            "Try: open notepad · take a screenshot · system briefing",
+        )
+    except Exception:
+        pass
+
     ui.run()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="JagX — Personal Jaguar AI")
-    parser.add_argument(
-        "--mode",
-        choices=["premium", "gui", "voice", "text", "tray"],
-        default="premium",
-        help="premium = tray jaguar + window (default)",
-    )
+    parser = argparse.ArgumentParser(description="JagX Premium")
+    parser.add_argument("--mode", choices=["premium", "gui", "text", "voice"], default="premium")
     args = parser.parse_args()
     print_banner()
 
@@ -174,21 +206,7 @@ def main():
         run_premium(agent)
     elif args.mode == "text":
         agent.run()
-    elif args.mode == "voice":
-        from voice.pipeline import VoicePipeline
-
-        pipeline = VoicePipeline()
-
-        def handle(text):
-            try:
-                return agent.think(text)
-            except Exception as e:
-                return f"Error: {e}"
-
-        pipeline.speak("JagX online.")
-        pipeline.start_continuous(on_command=handle)
     else:
-        # tray-only fallback
         run_premium(agent)
 
 
