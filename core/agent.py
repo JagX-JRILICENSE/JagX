@@ -93,6 +93,10 @@ try:
     from core.tools.power40 import POWER40_TOOLS, TOOL_FUNCTIONS as POWER40_FUNCS
 except Exception:
     POWER40_TOOLS, POWER40_FUNCS = [], {}
+try:
+    from core.tools.antivirus import ANTIVIRUS_TOOLS, TOOL_FUNCTIONS as ANTIVIRUS_FUNCS
+except Exception:
+    ANTIVIRUS_TOOLS, ANTIVIRUS_FUNCS = [], {}
 
 console = Console()
 
@@ -108,11 +112,11 @@ CONFIRM_TOOLS = {
     "delete_path", "uninstall_app",
     "shutdown_windows", "restart_windows", "empty_recycle_bin",
     "format_drive", "wipe_disk",
+    "delete_quarantined_file", "quarantine_file", "remove_detected_threats",
 }
 
 SHOW_RESULT_TOOLS = {
-    "vercel_deploy", "x_click_post_button", "whatsapp_send_message",
-    "github_push", "generate_image", "build_animated_website",
+    "vercel_deploy", "generate_image", "build_animated_website",
     "capture_webcam_photo", "describe_webcam",
 }
 
@@ -142,8 +146,9 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
     picked = [d for s, d in scored if s > 0][:cap]
     core_names = {
         "open_app", "screenshot_and_open", "prepare_stream", "open_obs",
-        "generate_image", "build_animated_website", "privacy_guard_scan",
-        "check_ip_reputation", "describe_webcam", "open_obs_youtube_prep",
+        "generate_image", "privacy_guard_scan", "check_ip_reputation",
+        "quick_virus_scan", "scan_path_for_viruses", "virus_guard_report",
+        "defender_status", "remove_detected_threats",
     }
     core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
     seen, out = set(), []
@@ -203,7 +208,8 @@ class JagXAgent:
 
         self.llm.system_prompt += """
 ### AUTONOMOUS MODE
-Stream prep (OBS/YouTube), vision (webcam), privacy scan, IP check, images, websites — act immediately.
+Stream prep, vision, privacy, virus scans (Windows Defender), images, websites — act immediately.
+Virus tools: quick_virus_scan, scan_path_for_viruses, virus_guard_report, remove_detected_threats.
 ### FORBIDDEN
 No bank PIN/card automation, no auto money transfer, no hacking.
 """
@@ -214,7 +220,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
             **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
             **MEGA_FUNCS, **GAME_FUNCS, **STREAMING_FUNCS, **WEB_BUILDER_FUNCS, **IMAGE_FUNCS,
-            **VISION_PRIVACY_FUNCS, **POWER40_FUNCS,
+            **VISION_PRIVACY_FUNCS, **POWER40_FUNCS, **ANTIVIRUS_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
@@ -222,7 +228,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
             POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS +
             MEGA_TOOLS + GAME_TOOLS + STREAMING_TOOLS + WEB_BUILDER_TOOLS + IMAGE_TOOLS +
-            VISION_PRIVACY_TOOLS + POWER40_TOOLS
+            VISION_PRIVACY_TOOLS + POWER40_TOOLS + ANTIVIRUS_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
@@ -334,12 +340,28 @@ No bank PIN/card automation, no auto money transfer, no hacking.
         if not user_input:
             return "Tell me what you want me to do."
         if self._is_money_block(user_input):
-            return "I will not automate bank/card payments. I can stream-setup, privacy-scan, generate images, build sites."
+            return "I will not automate bank/card payments. I can virus-scan, privacy-scan, stream-setup, generate images."
 
         low = user_input.lower().strip()
         slug = "open_" + re.sub(r"[^a-z0-9]+", "_", low.replace("open ", "", 1)).strip("_")
         if low.startswith("open ") and slug in self.tool_functions:
             return f"Done. {self._execute_tool(slug, {})}"
+
+        # Virus shortcuts
+        if any(x in low for x in ("quick virus scan", "scan for virus", "scan for viruses", "virus scan")):
+            if "full" in low and "full_virus_scan" in self.tool_functions:
+                return f"Done. {self._execute_tool('full_virus_scan', {})}"
+            if "quick_virus_scan" in self.tool_functions:
+                return f"Done. {self._execute_tool('quick_virus_scan', {})}"
+        if "scan downloads" in low and "scan_path_for_viruses" in self.tool_functions:
+            return f"Done. {self._execute_tool('scan_path_for_viruses', {'path': 'downloads'})}"
+        if ("virus status" in low or "defender status" in low or "virus guard" in low) and "virus_guard_report" in self.tool_functions:
+            return self._execute_tool("virus_guard_report", {})
+        if "update virus" in low and "update_virus_definitions" in self.tool_functions:
+            return f"Done. {self._execute_tool('update_virus_definitions', {})}"
+        if "remove threats" in low or "delete viruses" in low:
+            if "remove_detected_threats" in self.tool_functions:
+                return f"Done. {self._execute_tool('remove_detected_threats', {})}"
 
         if any(x in low for x in ("privacy scan", "who is using my camera", "check camera", "check mic")):
             if "privacy_guard_scan" in self.tool_functions:
@@ -372,6 +394,8 @@ No bank PIN/card automation, no auto money transfer, no hacking.
             "open obs": ("open_obs", {}),
             "privacy scan": ("privacy_guard_scan", {}),
             "check ip": ("check_ip_reputation", {}),
+            "quick virus scan": ("quick_virus_scan", {}),
+            "virus status": ("virus_guard_report", {}),
         }
         if low in fast:
             name, args = fast[low]
