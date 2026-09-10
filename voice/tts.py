@@ -1,7 +1,7 @@
 """
 JagX Text-to-Speech — always try to talk.
 1) edge-tts + pygame
-2) Windows SAPI (built-in)
+2) Windows SAPI (hidden PowerShell)
 3) pyttsx3 if present
 JRILICENSE
 """
@@ -30,6 +30,9 @@ try:
     HAS_PYTTSX3 = True
 except ImportError:
     HAS_PYTTSX3 = False
+
+# Hide console window on Windows when calling PowerShell
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _clean(text: str) -> str:
@@ -68,10 +71,11 @@ def _windows_sapi(text: str) -> bool:
     )
     try:
         r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
             capture_output=True,
             text=True,
             timeout=60,
+            creationflags=_CREATE_NO_WINDOW,
         )
         return r.returncode == 0
     except Exception:
