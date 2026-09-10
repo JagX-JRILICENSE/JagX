@@ -1,71 +1,81 @@
 @echo off
 REM ============================================================
-REM  JagX - Windows App Build Script
-REM  Creates a standalone executable folder you can run or ship
+REM  JagX Premium Windows Build
+REM  JRILICENSE
 REM ============================================================
 
 echo.
 echo  ========================================
-echo   Building JagX for Windows...
+echo   Building JagX Premium for Windows
 echo  ========================================
 echo.
 
-REM 1. Make sure we are in the project root
 cd /d "%~dp0"
 
-REM 2. Create / activate virtual environment (recommended)
 if not exist ".venv" (
     echo Creating virtual environment...
     python -m venv .venv
 )
 call .venv\Scripts\activate.bat
 
-REM 3. Install / upgrade build tools + project deps
 echo Installing dependencies...
-pip install --upgrade pip
+pip install --upgrade pip >nul
 pip install -r requirements.txt
-pip install pyinstaller
+pip install pyinstaller pillow pystray
 
-REM 4. Clean previous builds
+REM Generate jaguar icon for exe + tray
+echo Generating jaguar icon...
+python -c "from ui.tray import create_jaguar_icon; img=create_jaguar_icon(256); img.save('jagx_icon.png'); img.save('jagx_icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(32,32),(16,16)]); print('icon ok')" 2>nul
+if not exist "jagx_icon.ico" (
+    echo Icon generation skipped - continuing without custom ico
+)
+
 if exist "dist" rmdir /s /q dist
 if exist "build" rmdir /s /q build
 
-REM 5. Build with PyInstaller
 echo.
-echo Running PyInstaller... This can take a few minutes.
+echo Running PyInstaller...
 echo.
+
+if exist "jagx_icon.ico" (
+    set ICON_FLAG=--icon jagx_icon.ico
+) else (
+    set ICON_FLAG=
+)
 
 pyinstaller --noconfirm --clean ^
     --name "JagX" ^
     --windowed ^
-    --icon "NONE" ^
+    %ICON_FLAG% ^
     --add-data "config;config" ^
-    --add-data "core;core" ^
-    --add-data "voice;voice" ^
-    --add-data "ui;ui" ^
     --hidden-import "pystray._win32" ^
     --hidden-import "PIL._tkinter_finder" ^
     --hidden-import "edge_tts" ^
-    --hidden-import "faster_whisper" ^
+    --hidden-import "keyring.backends.Windows" ^
     --collect-all "edge_tts" ^
-    --collect-all "faster_whisper" ^
+    --collect-submodules "core" ^
+    --collect-submodules "ui" ^
+    --collect-submodules "voice" ^
     main.py
 
 echo.
 if exist "dist\JagX\JagX.exe" (
     echo  ========================================
-echo   BUILD SUCCESSFUL!
+echo   BUILD SUCCESSFUL
 echo  ========================================
 echo.
-echo  Your app is ready in:  dist\JagX\
+echo  Run:  dist\JagX\JagX.exe
+echo  You should see the orange jaguar in the system tray.
+echo  Close the window to keep JagX in the tray.
 echo.
-echo  To run it:  double-click  dist\JagX\JagX.exe
-echo.
-echo  You can copy the whole "JagX" folder anywhere
-echo  or create a shortcut to JagX.exe.
+) else if exist "dist\JagX.exe" (
+    echo  ========================================
+echo   BUILD SUCCESSFUL (one-file style)
+echo  ========================================
+echo  Run: dist\JagX.exe
 echo.
 ) else (
-    echo  BUILD FAILED - check the errors above.
+    echo  BUILD FAILED - read errors above.
 )
 
 pause
