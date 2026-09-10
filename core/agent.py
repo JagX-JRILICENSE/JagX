@@ -1,4 +1,4 @@
-"""JagX Agent - reliable action execution with Little Brain offline fallback."""
+"""JagX Agent — tools + Little Brain + hard safety limits."""
 from __future__ import annotations
 
 import json
@@ -53,6 +53,18 @@ try:
     from core.tools.power_features import POWER_FEATURE_TOOLS, TOOL_FUNCTIONS as POWER_FEATURE_FUNCS
 except Exception:
     POWER_FEATURE_TOOLS, POWER_FEATURE_FUNCS = [], {}
+try:
+    from core.tools.social_web import SOCIAL_WEB_TOOLS, TOOL_FUNCTIONS as SOCIAL_WEB_FUNCS
+except Exception:
+    SOCIAL_WEB_TOOLS, SOCIAL_WEB_FUNCS = [], {}
+try:
+    from core.tools.cloud_dev import CLOUD_DEV_TOOLS, TOOL_FUNCTIONS as CLOUD_DEV_FUNCS
+except Exception:
+    CLOUD_DEV_TOOLS, CLOUD_DEV_FUNCS = [], {}
+try:
+    from core.tools.developer import DEVELOPER_TOOLS, TOOL_FUNCTIONS as DEVELOPER_FUNCS
+except Exception:
+    DEVELOPER_TOOLS, DEVELOPER_FUNCS = [], {}
 
 console = Console()
 
@@ -69,13 +81,19 @@ DESTRUCTIVE_TOOLS = {
     "shutdown_windows", "restart_windows", "empty_recycle_bin",
     "block_camera_access", "kill_process_by_name", "kill_process",
     "save_credential", "get_credential", "delete_credential",
-    "clean_temp_files",
+    "clean_temp_files", "github_push", "github_commit_all",
+    "x_click_post_button", "whatsapp_send_message", "vercel_deploy",
 }
 
-BANKING_BLOCK_PATTERNS = [
+# Money / card / auto-trade — never automate
+MONEY_BLOCK_PATTERNS = [
     r"\btransfer money\b", r"\bsend money\b", r"\bbank transfer\b",
     r"\bwire transfer\b", r"\benter (my )?pin\b", r"\baccount (number|no)\b",
     r"\brouting number\b", r"\botp\b", r"\b2fa code\b",
+    r"\bpay with (my )?card\b", r"\bbuy (a )?domain with (my )?card\b",
+    r"\benter (my )?card\b", r"\bcvv\b", r"\bcard number\b",
+    r"\bauto.?trade\b", r"\bplace (a )?trade\b", r"\bbuy stock\b",
+    r"\bsell stock\b", r"\bforex\b.*\b(execute|place|order)\b",
 ]
 
 
@@ -91,7 +109,6 @@ class JagXAgent:
         self.on_tool_end: Optional[Callable[[str, str], None]] = None
         self.confirm_callback: Optional[Callable[[str], bool]] = None
 
-        # Little Brain — always available offline fallback
         try:
             from core.little_brain import get_little_brain
             self.little = get_little_brain()
@@ -119,23 +136,31 @@ class JagXAgent:
 
         self.llm.system_prompt += """
 
-### CRITICAL ACTION RULES
-When the user asks you to DO something, CALL TOOLS immediately.
-Prefer: open_app, screenshot_and_open, system_briefing, find_files, move_mouse, click, type_text.
-No bank PIN storage or automated money transfers.
+### CAPABILITIES
+- Desktop control, files, apps
+- Social: open X/Facebook/WhatsApp Web, draft posts, reply (confirm before send)
+- Passwords: save site logins via save_credential_interactive (not bank/card)
+- GitHub: status, commit, push, PR via gh CLI when installed
+- Vercel: deploy via CLI when logged in; open dashboard
+- Domains: open registrar; user pays themselves
+
+### HARD LIMITS
+- No bank PIN, card number, CVV storage or auto-fill
+- No automated money transfers or auto-trading orders
+- Confirm before public posts, WhatsApp send, git push, vercel prod deploy
 """
 
         self.tool_functions = {
             **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS,
             **CREDENTIAL_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **BROWSER_FUNCS,
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
-            **POWER_FEATURE_FUNCS,
+            **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
-            POWER_FEATURE_TOOLS
+            POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
@@ -148,9 +173,9 @@ No bank PIN storage or automated money transfers.
         except Exception:
             return {}
 
-    def _is_banking_request(self, text: str) -> bool:
+    def _is_money_block(self, text: str) -> bool:
         low = (text or "").lower()
-        return any(re.search(p, low, re.I) for p in BANKING_BLOCK_PATTERNS)
+        return any(re.search(p, low, re.I) for p in MONEY_BLOCK_PATTERNS)
 
     def _is_high_risk(self, name: str, arguments: Dict[str, Any]) -> bool:
         if name in DESTRUCTIVE_TOOLS:
@@ -185,7 +210,7 @@ No bank PIN storage or automated money transfers.
         if name in {"save_credential", "save_credential_interactive", "get_credential"}:
             account = str(arguments.get("account", "")).lower()
             if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
-                return "Refused: banking secrets are not stored or auto-filled."
+                return "Refused: banking/card secrets are not stored or auto-filled."
 
         if self._is_high_risk(name, arguments):
             if not self._ask_confirm(f"Allow sensitive action {name}?"):
@@ -246,10 +271,15 @@ No bank PIN storage or automated money transfers.
         if not user_input:
             return "Tell me what you want me to do."
 
-        if self._is_banking_request(user_input):
+        if self._is_money_block(user_input):
             return (
-                "I can open your bank site/app, but I will not store your PIN or auto-transfer money. "
-                "Enter the PIN yourself."
+                "I will **not** store card/PIN data, auto-transfer money, auto-buy domains with your card, "
+                "or place trades automatically.\n\n"
+                "What I *can* do:\n"
+                "• Open your bank / exchange / domain site so **you** complete payment\n"
+                "• Help research ideas to make money (content, products, freelancing)\n"
+                "• Deploy sites (Vercel) and improve GitHub code\n"
+                "• Post/reply on your social apps after you confirm"
             )
 
         low = user_input.lower().strip()
@@ -264,12 +294,14 @@ No bank PIN storage or automated money transfers.
             "organize downloads": ("organize_downloads", {}),
             "clean temp": ("clean_temp_files", {}),
             "mute": ("volume_mute_toggle", {}),
+            "open whatsapp": ("open_whatsapp_web", {}),
+            "open twitter": ("open_x", {}),
+            "open x": ("open_x", {}),
         }
         if low in fast:
             name, args = fast[low]
             return f"Done. {self._execute_tool(name, args)}"
 
-        # Prefer main LLM; on failure use Little Brain
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
             self.messages = self.messages[-30:]
