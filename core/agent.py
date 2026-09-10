@@ -1,4 +1,4 @@
-"""JagX Agent - reliable action execution for typed and voice commands."""
+"""JagX Agent - reliable action execution with Little Brain offline fallback."""
 from __future__ import annotations
 
 import json
@@ -91,13 +91,20 @@ class JagXAgent:
         self.on_tool_end: Optional[Callable[[str, str], None]] = None
         self.confirm_callback: Optional[Callable[[str], bool]] = None
 
-        # Immediately bind whatever model Ollama already has
+        # Little Brain — always available offline fallback
+        try:
+            from core.little_brain import get_little_brain
+            self.little = get_little_brain()
+            self.little.ensure()
+        except Exception:
+            self.little = None
+
         try:
             from core.setup_ai import ensure_local_ai
             status = ensure_local_ai(
                 base_url=getattr(self.llm, "base_url", "http://127.0.0.1:11434"),
                 preferred_model=getattr(self.llm, "model", "qwen2.5:3b"),
-                auto_pull=False,  # don't block startup; Fix AI button can pull
+                auto_pull=False,
                 auto_install_ollama=False,
             )
             if status.get("ok") and status.get("model"):
@@ -113,14 +120,9 @@ class JagXAgent:
         self.llm.system_prompt += """
 
 ### CRITICAL ACTION RULES
-When the user asks you to DO something, CALL TOOLS immediately. Do not only describe.
-Prefer: open_app, run_shell, move_mouse, click, type_text, find_files, screenshot_and_open, system_briefing.
-
-### PASSWORDS
-Save personal site passwords with save_credential_interactive. Never show secrets in chat.
-
-### HARD LIMITS
-No bank PIN storage, no automated money transfers.
+When the user asks you to DO something, CALL TOOLS immediately.
+Prefer: open_app, screenshot_and_open, system_briefing, find_files, move_mouse, click, type_text.
+No bank PIN storage or automated money transfers.
 """
 
         self.tool_functions = {
@@ -136,7 +138,8 @@ No bank PIN storage, no automated money transfers.
             POWER_FEATURE_TOOLS
         )
 
-        console.print(f"[bold orange1]JagX ready[/bold orange1] — {len(self.tool_definitions)} tools — model: {self.llm.model}")
+        brain = getattr(self.little, "model_name", "rules") if self.little else "none"
+        console.print(f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_definitions)} model:{self.llm.model} little-brain:{brain}")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
@@ -182,7 +185,7 @@ No bank PIN storage, no automated money transfers.
         if name in {"save_credential", "save_credential_interactive", "get_credential"}:
             account = str(arguments.get("account", "")).lower()
             if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
-                return "Refused: banking PIN/OTP/card secrets are not stored or auto-filled."
+                return "Refused: banking secrets are not stored or auto-filled."
 
         if self._is_high_risk(name, arguments):
             if not self._ask_confirm(f"Allow sensitive action {name}?"):
@@ -194,12 +197,6 @@ No bank PIN storage, no automated money transfers.
             except Exception:
                 pass
 
-        safe_args = dict(arguments)
-        for k in list(safe_args):
-            if any(s in k.lower() for s in ("password", "secret", "token", "pin")):
-                safe_args[k] = "[hidden]"
-        console.print(f"[cyan]→ {name}[/cyan] {safe_args}")
-
         try:
             result = str(func(**arguments))
         except TypeError as e:
@@ -209,9 +206,9 @@ No bank PIN storage, no automated money transfers.
 
         if name in {"get_credential", "request_password", "save_credential"}:
             if result.startswith("SECURE_CREDENTIAL:"):
-                result = "CREDENTIAL_AVAILABLE_LOCALLY (secret not shown)"
+                result = "CREDENTIAL_AVAILABLE_LOCALLY"
             elif name == "request_password" and not result.startswith("PASSWORD_INPUT_"):
-                result = "PASSWORD_RECEIVED_LOCALLY (secret not shown)"
+                result = "PASSWORD_RECEIVED_LOCALLY"
 
         if self.on_tool_end:
             try:
@@ -220,6 +217,30 @@ No bank PIN storage, no automated money transfers.
                 pass
         return result
 
+    def _little_brain_act(self, user_input: str) -> str:
+        if not self.little:
+            return "Little Brain unavailable."
+        resp = self.little.respond(user_input)
+        calls = resp.get("tool_calls") or []
+        parts = []
+        for call in calls:
+            fn = call.get("function") or call
+            name = fn.get("name") or call.get("name") or ""
+            raw = fn.get("arguments") or call.get("arguments") or {}
+            if isinstance(raw, str):
+                try:
+                    args = json.loads(raw)
+                except json.JSONDecodeError:
+                    args = {}
+            else:
+                args = raw or {}
+            if name:
+                parts.append(self._execute_tool(name, args))
+        content = (resp.get("content") or "").strip()
+        if parts:
+            return (content + "\n" if content else "") + " | ".join(parts)
+        return content or "Little Brain ready."
+
     def think(self, user_input: str) -> str:
         user_input = (user_input or "").strip()
         if not user_input:
@@ -227,11 +248,10 @@ No bank PIN storage, no automated money transfers.
 
         if self._is_banking_request(user_input):
             return (
-                "I can open your bank site/app, but I will not store your PIN or auto-transfer money.\n"
-                "Enter the PIN yourself. I can help navigate after you log in."
+                "I can open your bank site/app, but I will not store your PIN or auto-transfer money. "
+                "Enter the PIN yourself."
             )
 
-        # Fast-path common commands so small models still act immediately
         low = user_input.lower().strip()
         fast = {
             "open notepad": ("open_app", {"app_name": "notepad"}),
@@ -247,52 +267,54 @@ No bank PIN storage, no automated money transfers.
         }
         if low in fast:
             name, args = fast[low]
-            result = self._execute_tool(name, args)
-            return f"Done. {result}"
+            return f"Done. {self._execute_tool(name, args)}"
 
+        # Prefer main LLM; on failure use Little Brain
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
             self.messages = self.messages[-30:]
 
-        for _ in range(12):
-            response = self.llm.chat(
-                messages=self.messages,
-                tools=self.tool_definitions,
-                tool_choice="auto",
-            )
-            tool_calls = response.get("tool_calls")
-            if tool_calls:
-                self.messages.append(response)
-                for call in tool_calls:
-                    fn = call.get("function") or {}
-                    name = fn.get("name") or ""
-                    try:
-                        args = json.loads(fn.get("arguments") or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    result = self._execute_tool(name, args)
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": call.get("id", name),
-                        "name": name,
-                        "content": result,
-                    })
-                continue
+        try:
+            for _ in range(10):
+                response = self.llm.chat(
+                    messages=self.messages,
+                    tools=self.tool_definitions,
+                    tool_choice="auto",
+                )
+                content_preview = (response.get("content") or "").lower()
+                if any(x in content_preview for x in ("timed out", "cannot reach ollama", "no local model", "model error")):
+                    return "Main AI unavailable — using Little Brain.\n" + self._little_brain_act(user_input)
 
-            content = (response.get("content") or "").strip()
-            self.messages.append({"role": "assistant", "content": content})
-            if any(w in low for w in ("remember", "my name is", "i like", "i prefer", "note that")):
-                try:
-                    self.memory.add_note(user_input)
-                except Exception:
-                    pass
-            return content or "Done."
+                tool_calls = response.get("tool_calls")
+                if tool_calls:
+                    self.messages.append(response)
+                    for call in tool_calls:
+                        fn = call.get("function") or {}
+                        name = fn.get("name") or ""
+                        try:
+                            args = json.loads(fn.get("arguments") or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        result = self._execute_tool(name, args)
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": call.get("id", name),
+                            "name": name,
+                            "content": result,
+                        })
+                    continue
 
-        return "I hit the tool-round limit. Try a shorter command."
+                content = (response.get("content") or "").strip()
+                self.messages.append({"role": "assistant", "content": content})
+                return content or "Done."
+        except Exception as e:
+            return f"Main AI error ({e}). Little Brain:\n" + self._little_brain_act(user_input)
+
+        return self._little_brain_act(user_input)
 
     def run(self):
         self.running = True
-        console.print("[green]JagX text mode. Type a command and press Enter.[/green]")
+        console.print("[green]JagX text mode.[/green]")
         while self.running:
             try:
                 text = input("[You] > ").strip()
@@ -300,9 +322,8 @@ No bank PIN storage, no automated money transfers.
                     continue
                 if text.lower() in {"exit", "quit", "stop", "sleep"}:
                     break
-                reply = self.think(text)
                 console.print("[bold orange1]JagX:[/bold orange1]")
-                console.print(Markdown(reply))
+                console.print(Markdown(self.think(text)))
             except KeyboardInterrupt:
                 break
             except Exception as e:
