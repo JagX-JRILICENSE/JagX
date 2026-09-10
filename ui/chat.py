@@ -1,4 +1,4 @@
-"""JagX main window — always talks while working."""
+"""JagX main window — reliable talk + Train/Fix AI."""
 from __future__ import annotations
 
 import threading
@@ -51,9 +51,7 @@ class JagXChat:
         def _tool_start(name: str, args: dict):
             self._set_status(f"Working: {name}", True)
             self._append("System", f"→ {name}")
-            # Always narrate actions
-            nice = name.replace("_", " ")
-            self._talk(f"Working on {nice}")
+            self._talk(f"Working on {name.replace('_', ' ')}")
 
         def _tool_end(name: str, result: str):
             short = result if len(result) < 160 else result[:160] + "…"
@@ -70,14 +68,13 @@ class JagXChat:
         self._build()
         self._append(
             "JagX",
-            "I will talk while I work.\n"
-            "Examples: open notepad · open 2048 · press space in game · system briefing",
+            "Type a command and press Do it.\n"
+            "Works even if chat AI is slow: open notepad · screenshot · virus scan",
         )
-        self._talk("JagX is ready. Tell me what to do.")
+        self._talk("JagX is ready")
         threading.Thread(target=self._startup_ai_check, daemon=True).start()
 
     def _talk(self, text: str):
-        """Always attempt speech."""
         if not text:
             return
         self._set_speaking(f"🔊 {text[:80]}")
@@ -87,18 +84,18 @@ class JagXChat:
             elif direct_speak_async:
                 direct_speak_async(text)
         except Exception:
-            try:
-                if direct_speak_async:
+            if direct_speak_async:
+                try:
                     direct_speak_async(text)
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
     def _build(self):
         self.root.configure(bg=BG)
         top = tk.Frame(self.root, bg=PANEL)
         top.pack(fill="x")
         tk.Label(top, text="🐆 JagX", bg=PANEL, fg=TEXT, font=("Segoe UI", 22, "bold")).pack(side="left", padx=16, pady=12)
-        self.status = tk.Label(top, text="● Starting…", bg=PANEL, fg=WARN, font=("Segoe UI", 10, "bold") )
+        self.status = tk.Label(top, text="● Starting…", bg=PANEL, fg=WARN, font=("Segoe UI", 10, "bold"))
         self.status.pack(side="right", padx=16)
         self.model_lbl = tk.Label(top, text="", bg=PANEL, fg=MUTED, font=("Segoe UI", 9))
         self.model_lbl.pack(side="right", padx=8)
@@ -119,15 +116,21 @@ class JagXChat:
         chips.pack(fill="x", padx=12, pady=4)
         for label, cmd in [
             ("Open Notepad", "open notepad"),
-            ("Play 2048", "open 2048"),
-            ("Play dino", "open dino game"),
             ("Screenshot", "take a screenshot"),
+            ("Virus scan", "quick virus scan"),
+            ("Privacy scan", "privacy scan"),
             ("Train / Fix AI", "__fix_ai__"),
         ]:
             tk.Button(
-                chips, text=label,
+                chips,
+                text=label,
                 command=(self.fix_ai if cmd == "__fix_ai__" else lambda c=cmd: self.quick(c)),
-                bg=CARD, fg=TEXT, relief="flat", font=("Segoe UI", 9), padx=10, pady=6,
+                bg=CARD,
+                fg=TEXT,
+                relief="flat",
+                font=("Segoe UI", 9),
+                padx=10,
+                pady=6,
             ).pack(side="left", padx=3, pady=3)
 
         mid = tk.Frame(self.root, bg=BG)
@@ -144,6 +147,7 @@ class JagXChat:
             self.chat.insert(tk.END, f"{who}: {text}\n\n")
             self.chat.configure(state="disabled")
             self.chat.see(tk.END)
+
         self.root.after(0, _do)
 
     def _set_status(self, text: str, busy: bool = False):
@@ -171,15 +175,13 @@ class JagXChat:
 
     def _think(self, text: str):
         try:
-            self._append("JagX", f"Got it: “{text}”. Working…")
             response = self.agent.think(text)
         except Exception as exc:
             response = f"Something went wrong: {exc}"
         self._append("JagX", response)
         self._busy = False
         self._set_status("Ready")
-        # Always speak the result (shortened for speech)
-        spoken = response if len(response) < 350 else response[:350] + "..."
+        spoken = response if len(response) < 280 else response[:280] + "..."
         self._talk(spoken)
         self.root.after(8000, lambda: self._set_speaking(""))
 
@@ -201,7 +203,7 @@ class JagXChat:
         self._set_speaking("")
         if not text:
             self._append("JagX", "Didn't catch that — type here.")
-            self._talk("I did not catch that. Please type.")
+            self._talk("Please type your command")
             self._set_status("Type a command")
             return
         self.root.after(0, lambda: (self.entry.delete(0, tk.END), self.entry.insert(0, text), self.send()))
@@ -209,14 +211,24 @@ class JagXChat:
     def _startup_ai_check(self):
         self._set_status("Checking AI…", True)
         try:
+            # Prefer 3b
+            try:
+                models = getattr(self.agent.llm, "available_models", []) or []
+                for m in models:
+                    if "qwen2.5:3b" in m.lower() and "coder" not in m.lower():
+                        self.agent.llm.model = m
+                        break
+            except Exception:
+                pass
             st = self.agent.llm.status()
             model = st.get("model") or getattr(self.agent.llm, "model", "?")
             self.root.after(0, lambda: self.model_lbl.configure(text=f"Model: {model}"))
             if st.get("reachable"):
                 self._set_status("Ready")
+                self._talk(f"Ready with {model}")
             else:
                 self._set_status("AI not ready", True)
-                self._talk("AI model not ready. Click Train Fix AI.")
+                self._append("JagX", "Ollama not ready. Keep Ollama running. Model: ollama pull qwen2.5:3b")
         except Exception as e:
             self._set_status("AI check failed", True)
             self._append("JagX", str(e))
@@ -225,31 +237,42 @@ class JagXChat:
         if self._busy:
             return
         self._busy = True
-        self._set_status("Installing model…", True)
-        self._talk("Installing the best model for your PC")
-        self._append("JagX", "Installing / specializing model…")
+        self._set_status("Fixing AI…", True)
+        self._talk("Setting up qwen 2.5")
+        self._append("JagX", "Connecting to Ollama and selecting qwen2.5:3b…")
 
         def worker():
             def progress(msg: str):
                 self._set_status(msg[:60], True)
                 self._append("Setup", msg)
 
-            try:
-                from core.train_jagx import install_best_jagx_model
-                result = install_best_jagx_model(on_progress=progress, force_recreate=True)
-            except Exception:
-                from core.setup_ai import ensure_local_ai
-                result = ensure_local_ai(preferred_model="jagx", auto_pull=True, specialize=True, on_progress=progress)
+            from core.setup_ai import ensure_local_ai, list_models
 
-            if result.get("ok") and result.get("model"):
-                self.agent.llm.model = result["model"]
-                self.root.after(0, lambda: self.model_lbl.configure(text=f"Model: {result['model']}"))
-                self._append("JagX", f"Ready with {result['model']}")
-                self._talk(f"AI ready with {result['model']}")
+            result = ensure_local_ai(
+                preferred_model="qwen2.5:3b",
+                auto_pull=True,
+                specialize=False,
+                on_progress=progress,
+            )
+            models = list_models()
+            model = result.get("model")
+            for m in models:
+                if "qwen2.5:3b" in m.lower() and "coder" not in m.lower():
+                    model = m
+                    break
+            if model:
+                self.agent.llm.model = model
+                self.agent.llm.available_models = models
+                try:
+                    self.agent.llm.warm_up()
+                except Exception:
+                    pass
+                self.root.after(0, lambda: self.model_lbl.configure(text=f"Model: {model}"))
+                self._append("JagX", f"Ready with {model}. Try: hi  or  open notepad")
+                self._talk(f"Ready with {model}")
                 self._set_status("Ready")
             else:
-                self._append("JagX", result.get("message") or "Setup failed")
-                self._talk("Model setup failed")
+                self._append("JagX", result.get("message") or "Could not set model. Run: ollama pull qwen2.5:3b")
                 self._set_status("AI setup failed", True)
             self._busy = False
 
