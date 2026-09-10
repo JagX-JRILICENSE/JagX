@@ -69,6 +69,10 @@ try:
     from core.tools.mega_features import MEGA_TOOLS, TOOL_FUNCTIONS as MEGA_FUNCS
 except Exception:
     MEGA_TOOLS, MEGA_FUNCS = [], {}
+try:
+    from core.tools.games import GAME_TOOLS, TOOL_FUNCTIONS as GAME_FUNCS
+except Exception:
+    GAME_TOOLS, GAME_FUNCS = [], {}
 
 console = Console()
 
@@ -104,7 +108,6 @@ MONEY_BLOCK_PATTERNS = [
 
 
 def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[dict]:
-    """Keep the LLM fast: send core tools + mega tools that match the request."""
     low = (user_text or "").lower()
     tokens = set(re.findall(r"[a-z0-9]+", low))
     scored = []
@@ -117,11 +120,11 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
         scored.append((score, d))
     scored.sort(key=lambda x: x[0], reverse=True)
     picked = [d for s, d in scored if s > 0][:cap]
-    # Always keep a small core set first
     core_names = {
         "open_app", "screenshot_and_open", "system_briefing", "open_any_url",
         "open_x", "open_whatsapp_web", "vercel_deploy", "github_git_status",
         "add_note", "add_task", "list_tasks",
+        "open_2048", "open_dino_game", "open_steam", "game_press_key", "play_simple_loop",
     }
     core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
     seen = set()
@@ -183,8 +186,8 @@ class JagXAgent:
         self.llm.system_prompt += """
 
 ### AUTONOMOUS MODE
-Do posts, replies, deploys, code edits, and app/site opens without asking.
-Use matching tools. After deploy/post, a screenshot may open automatically.
+Act immediately. Open games, press keys, post, deploy without asking.
+Games: open_steam, open_2048, open_dino_game, game_press_key, play_simple_loop, game_combo.
 
 ### FORBIDDEN
 No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
@@ -195,14 +198,14 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
             **CREDENTIAL_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **BROWSER_FUNCS,
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
             **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
-            **MEGA_FUNCS,
+            **MEGA_FUNCS, **GAME_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
             POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS +
-            MEGA_TOOLS
+            MEGA_TOOLS + GAME_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
@@ -322,11 +325,10 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
         if self._is_money_block(user_input):
             return (
                 "I will not store card/PIN data, auto-transfer money, or place trades automatically.\n"
-                "I can open the site, improve code, deploy, and post on your socials."
+                "I can open the site, improve code, deploy, post, and play games on screen."
             )
 
         low = user_input.lower().strip()
-        # Direct tool by spoken name: "open figma", "open task manager"
         slug = "open_" + re.sub(r"[^a-z0-9]+", "_", low.replace("open ", "", 1)).strip("_")
         if low.startswith("open ") and slug in self.tool_functions:
             return f"Done. {self._execute_tool(slug, {})}"
@@ -341,10 +343,25 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
             "organize downloads": ("organize_downloads", {}),
             "open whatsapp": ("open_whatsapp_web", {}),
             "open x": ("open_x", {}),
+            "open 2048": ("open_2048", {}),
+            "play 2048": ("open_2048", {}),
+            "open dino": ("open_dino_game", {}),
+            "open dino game": ("open_dino_game", {}),
+            "play dino": ("open_dino_game", {}),
+            "open snake": ("open_snake", {}),
+            "open steam": ("open_steam", {}),
+            "open chess": ("open_chess", {}),
         }
         if low in fast:
             name, args = fast[low]
             return f"Done. {self._execute_tool(name, args)}"
+
+        # "press space 10 times" style
+        m = re.match(r"press ([a-z0-9]+)(?:\s+(\d+)\s*times?)?", low)
+        if m and "game_press_key" in self.tool_functions:
+            key = m.group(1)
+            times = int(m.group(2) or 1)
+            return f"Done. {self._execute_tool('game_press_key', {'key': key, 'times': times})}"
 
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
