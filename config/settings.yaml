@@ -3,46 +3,27 @@
 
 app:
   name: "JagX"
-  version: "0.5.0-dev"
+  version: "0.6.0"
   license: "JRILICENSE"
 
 llm:
   provider: "ollama"
-  model: "qwen2.5"
-  base_url: "http://localhost:11434"
-  temperature: 0.7
+  model: "qwen2.5:3b"          # fast chat model (avoid coder:1.5b for control)
+  base_url: "http://127.0.0.1:11434"
+  temperature: 0.4
+  timeout: 90
   auto_detect_models: true
-
-image_generation:
-  enabled: true
-  provider: "local"
-  comfyui_url: "http://127.0.0.1:8188"
-  workflow_path: "./config/image_workflow.json"
-  output_dir: "./data/generated_images"
-  open_after_generate: false
-
-idle_power:
-  enabled: false
-  timeout_minutes: 30
-  action: "sleep"
+  auto_pull_model: true
 
 voice:
   enabled: true
   wake_word: "jagx"
   stt_model_size: "base"
-  stt_model: "base"
   tts_voice: "en-US-AriaNeural"
   language: "en"
-  silence_threshold: 0.015
-  silence_duration: 1.4
-  max_record_seconds: 25
 
 safety:
   high_risk_only: true
-  blocked_commands:
-    - "rm -rf /"
-    - "format"
-    - "mkfs"
 
 system:
   platform: "auto"
@@ -52,3 +33,8 @@ system:
 memory:
   enabled: true
   path: "./data/memory"
+
+idle_power:
+  enabled: false
+  timeout_minutes: 30
+  action: "sleep"
