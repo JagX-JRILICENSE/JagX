@@ -131,7 +131,7 @@ MONEY_BLOCK_PATTERNS = [
 ]
 
 
-def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[dict]:
+def _select_tools(all_defs: List[dict], user_text: str, cap: int = 24) -> List[dict]:
     low = (user_text or "").lower()
     tokens = set(re.findall(r"[a-z0-9]+", low))
     scored = []
@@ -145,10 +145,8 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
     scored.sort(key=lambda x: x[0], reverse=True)
     picked = [d for s, d in scored if s > 0][:cap]
     core_names = {
-        "open_app", "screenshot_and_open", "prepare_stream", "open_obs",
-        "generate_image", "privacy_guard_scan", "check_ip_reputation",
-        "quick_virus_scan", "scan_path_for_viruses", "virus_guard_report",
-        "defender_status", "remove_detected_threats",
+        "open_app", "screenshot_and_open", "quick_virus_scan",
+        "privacy_guard_scan", "system_briefing",
     }
     core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
     seen, out = set(), []
@@ -157,15 +155,7 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
         if n and n not in seen:
             seen.add(n)
             out.append(d)
-    if len(out) < 24:
-        for d in all_defs:
-            n = (d.get("function") or {}).get("name")
-            if n and n not in seen:
-                seen.add(n)
-                out.append(d)
-            if len(out) >= 24:
-                break
-    return out
+    return out[:cap] if out else all_defs[:16]
 
 
 class JagXAgent:
@@ -192,27 +182,21 @@ class JagXAgent:
             from core.setup_ai import ensure_local_ai
             status = ensure_local_ai(
                 base_url=getattr(self.llm, "base_url", "http://127.0.0.1:11434"),
-                preferred_model=getattr(self.llm, "model", "qwen2.5:3b"),
+                preferred_model="qwen2.5:3b",
                 auto_pull=False,
                 auto_install_ollama=False,
             )
             if status.get("ok") and status.get("model"):
                 self.llm.model = status["model"]
                 self.llm.available_models = status.get("available") or []
+            for m in getattr(self.llm, "available_models", []) or []:
+                if "qwen2.5:3b" in m.lower() and "coder" not in m.lower():
+                    self.llm.model = m
+                    break
         except Exception:
             pass
 
-        context = self.memory.get_context_summary()
-        if context and context != "No long-term memory yet.":
-            self.llm.system_prompt += f"\n\n### Personal Memory\n{context}"
-
-        self.llm.system_prompt += """
-### AUTONOMOUS MODE
-Stream prep, vision, privacy, virus scans (Windows Defender), images, websites — act immediately.
-Virus tools: quick_virus_scan, scan_path_for_viruses, virus_guard_report, remove_detected_threats.
-### FORBIDDEN
-No bank PIN/card automation, no auto money transfer, no hacking.
-"""
+        self.llm.system_prompt += "\nBe short. Call tools for actions. Greet briefly for hi/hello.\n"
 
         self.tool_functions = {
             **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS,
@@ -231,8 +215,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
             VISION_PRIVACY_TOOLS + POWER40_TOOLS + ANTIVIRUS_TOOLS
         )
 
-        brain = getattr(self.little, "model_name", "rules") if self.little else "none"
-        console.print(f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_functions)} model:{self.llm.model} little-brain:{brain}")
+        console.print(f"[bold orange1]JagX ready[/bold orange1] — tools:{len(self.tool_functions)} model:{self.llm.model}")
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         try:
@@ -252,7 +235,6 @@ No bank PIN/card automation, no auto money transfer, no hacking.
             cmd = str(arguments.get("command", "")).lower()
             if any(x in cmd for x in ("format ", "diskpart", "rm -rf /", "mkfs", "del /f /s /q")):
                 return True
-            return False
         blob = (name + " " + json.dumps(arguments)).lower()
         return any(re.search(p, blob, re.I) for p in HIGH_RISK_PATTERNS)
 
@@ -262,36 +244,15 @@ No bank PIN/card automation, no auto money transfer, no hacking.
                 return bool(self.confirm_callback(message))
             except Exception:
                 return False
-        if self.gui_mode:
-            return True
-        try:
-            from rich.prompt import Confirm
-            return Confirm.ask(message, default=False)
-        except Exception:
-            return False
-
-    def _auto_show(self, name: str) -> str:
-        if name not in SHOW_RESULT_TOOLS:
-            return ""
-        shot = self.tool_functions.get("screenshot_and_open")
-        if not shot:
-            return ""
-        try:
-            return f"\n[Preview] {shot()}"
-        except Exception:
-            return ""
+        return True if self.gui_mode else False
 
     def _execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
         func = self.tool_functions.get(name)
         if not func:
             return f"Unknown tool: {name}"
-        if name in {"save_credential", "save_credential_interactive", "get_credential"}:
-            account = str(arguments.get("account", "")).lower()
-            if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
-                return "Refused: banking/card secrets are not stored or auto-filled."
         if self._needs_confirm(name, arguments):
-            if not self._ask_confirm(f"Allow sensitive action {name}?"):
-                return "Action cancelled by user."
+            if not self._ask_confirm(f"Allow {name}?"):
+                return "Cancelled."
         if self.on_tool_start:
             try:
                 self.on_tool_start(name, arguments)
@@ -302,8 +263,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
         except TypeError as e:
             result = f"Tool argument error: {e}"
         except Exception as e:
-            result = f"Tool execution error: {e}"
-        result = result + self._auto_show(name)
+            result = f"Tool error: {e}"
         if self.on_tool_end:
             try:
                 self.on_tool_end(name, result)
@@ -313,7 +273,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
 
     def _little_brain_act(self, user_input: str) -> str:
         if not self.little:
-            return "Little Brain unavailable."
+            return "Try: open notepad | take a screenshot | quick virus scan"
         resp = self.little.respond(user_input)
         calls = resp.get("tool_calls") or []
         parts = []
@@ -333,85 +293,65 @@ No bank PIN/card automation, no auto money transfer, no hacking.
         content = (resp.get("content") or "").strip()
         if parts:
             return (content + "\n" if content else "") + " | ".join(parts)
-        return content or "Little Brain ready."
+        return content or "OK"
 
     def think(self, user_input: str) -> str:
         user_input = (user_input or "").strip()
         if not user_input:
             return "Tell me what you want me to do."
         if self._is_money_block(user_input):
-            return "I will not automate bank/card payments. I can virus-scan, privacy-scan, stream-setup, generate images."
+            return "I will not automate bank/card payments."
 
         low = user_input.lower().strip()
+
+        if low in {"hi", "hello", "hey", "good morning", "good evening", "how are you"}:
+            return "Hey! I'm JagX. Try: open notepad · take a screenshot · quick virus scan"
+
+        if self.little:
+            hit = self.little.rules.interpret(user_input)
+            if hit and hit.get("tool") is None:
+                return hit["say"]
+            if hit and hit.get("tool") and hit["tool"] in self.tool_functions:
+                return f"{hit['say']}. {self._execute_tool(hit['tool'], hit.get('args') or {})}"
+
         slug = "open_" + re.sub(r"[^a-z0-9]+", "_", low.replace("open ", "", 1)).strip("_")
         if low.startswith("open ") and slug in self.tool_functions:
             return f"Done. {self._execute_tool(slug, {})}"
 
-        # Virus shortcuts
-        if any(x in low for x in ("quick virus scan", "scan for virus", "scan for viruses", "virus scan")):
-            if "full" in low and "full_virus_scan" in self.tool_functions:
-                return f"Done. {self._execute_tool('full_virus_scan', {})}"
-            if "quick_virus_scan" in self.tool_functions:
-                return f"Done. {self._execute_tool('quick_virus_scan', {})}"
-        if "scan downloads" in low and "scan_path_for_viruses" in self.tool_functions:
-            return f"Done. {self._execute_tool('scan_path_for_viruses', {'path': 'downloads'})}"
-        if ("virus status" in low or "defender status" in low or "virus guard" in low) and "virus_guard_report" in self.tool_functions:
-            return self._execute_tool("virus_guard_report", {})
-        if "update virus" in low and "update_virus_definitions" in self.tool_functions:
-            return f"Done. {self._execute_tool('update_virus_definitions', {})}"
-        if "remove threats" in low or "delete viruses" in low:
-            if "remove_detected_threats" in self.tool_functions:
-                return f"Done. {self._execute_tool('remove_detected_threats', {})}"
-
-        if any(x in low for x in ("privacy scan", "who is using my camera", "check camera", "check mic")):
-            if "privacy_guard_scan" in self.tool_functions:
-                return self._execute_tool("privacy_guard_scan", {})
-        if "check my ip" in low or "ip blacklist" in low or "ip reputation" in low:
-            if "check_ip_reputation" in self.tool_functions:
-                return self._execute_tool("check_ip_reputation", {})
-        if "look at me" in low or "use camera" in low or "what do you see" in low:
-            if "describe_webcam" in self.tool_functions:
-                return self._execute_tool("describe_webcam", {})
-
-        if low.startswith("generate image") or low.startswith("draw "):
-            prompt = re.sub(r"^(generate image( of)?|draw)\s*", "", low, flags=re.I).strip()
-            if prompt and "generate_image" in self.tool_functions:
-                return f"Done. {self._execute_tool('generate_image', {'prompt': prompt})}"
-
-        if "build" in low and "website" in low and "build_animated_website" in self.tool_functions:
-            return f"Done. {self._execute_tool('build_animated_website', {'title': 'JagX Site', 'headline': 'Welcome', 'subtitle': user_input})}"
-
-        if low.startswith("stream on ") or "youtube live" in low or low.startswith("prepare stream"):
-            if "youtube" in low and "open_obs_youtube_prep" in self.tool_functions:
-                return f"Done. {self._execute_tool('open_obs_youtube_prep', {})}"
-            platform = low.replace("stream on ", "").replace("prepare stream", "twitch").strip() or "twitch"
-            if "prepare_stream" in self.tool_functions:
-                return f"Done. {self._execute_tool('prepare_stream', {'platform': platform})}"
-
         fast = {
             "open notepad": ("open_app", {"app_name": "notepad"}),
             "take a screenshot": ("screenshot_and_open", {}),
+            "screenshot": ("screenshot_and_open", {}),
             "open obs": ("open_obs", {}),
             "privacy scan": ("privacy_guard_scan", {}),
             "check ip": ("check_ip_reputation", {}),
             "quick virus scan": ("quick_virus_scan", {}),
             "virus status": ("virus_guard_report", {}),
+            "system briefing": ("system_briefing", {}),
         }
         if low in fast:
             name, args = fast[low]
-            return f"Done. {self._execute_tool(name, args)}"
+            if name in self.tool_functions:
+                return f"Done. {self._execute_tool(name, args)}"
 
         self.messages.append({"role": "user", "content": user_input})
-        if len(self.messages) > 40:
-            self.messages = self.messages[-30:]
+        if len(self.messages) > 30:
+            self.messages = self.messages[-20:]
 
         tools = _select_tools(self.tool_definitions, user_input)
         try:
-            for _ in range(12):
+            for _ in range(8):
                 response = self.llm.chat(messages=self.messages, tools=tools, tool_choice="auto")
                 content_preview = (response.get("content") or "").lower()
-                if any(x in content_preview for x in ("timed out", "cannot reach ollama", "no local model", "model error")):
-                    return "Main AI unavailable — Little Brain:\n" + self._little_brain_act(user_input)
+                if any(x in content_preview for x in ("cannot reach ollama", "no local model")):
+                    return self._little_brain_act(user_input)
+                if "timed out" in content_preview or "still loading" in content_preview:
+                    lb = self._little_brain_act(user_input)
+                    if lb and "Try:" not in lb:
+                        return lb
+                    return "Model is warming up. Try: open notepad · take a screenshot"
+                if "model error" in content_preview:
+                    return self._little_brain_act(user_input)
                 tool_calls = response.get("tool_calls")
                 if tool_calls:
                     self.messages.append(response)
@@ -433,8 +373,8 @@ No bank PIN/card automation, no auto money transfer, no hacking.
                 content = (response.get("content") or "").strip()
                 self.messages.append({"role": "assistant", "content": content})
                 return content or "Done."
-        except Exception as e:
-            return f"Main AI error ({e}). Little Brain:\n" + self._little_brain_act(user_input)
+        except Exception:
+            return self._little_brain_act(user_input)
         return self._little_brain_act(user_input)
 
     def run(self):
@@ -444,7 +384,7 @@ No bank PIN/card automation, no auto money transfer, no hacking.
                 text = input("[You] > ").strip()
                 if not text:
                     continue
-                if text.lower() in {"exit", "quit", "stop", "sleep"}:
+                if text.lower() in {"exit", "quit", "stop"}:
                     break
                 console.print("[bold orange1]JagX:[/bold orange1]")
                 console.print(Markdown(self.think(text)))
