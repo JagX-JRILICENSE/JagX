@@ -49,6 +49,10 @@ try:
     from core.tools.power import POWER_TOOL_DEFINITIONS, TOOL_FUNCTIONS as POWER_FUNCS
 except Exception:
     POWER_TOOL_DEFINITIONS, POWER_FUNCS = [], {}
+try:
+    from core.tools.power_features import POWER_FEATURE_TOOLS, TOOL_FUNCTIONS as POWER_FEATURE_FUNCS
+except Exception:
+    POWER_FEATURE_TOOLS, POWER_FEATURE_FUNCS = [], {}
 
 console = Console()
 
@@ -63,11 +67,11 @@ HIGH_RISK_PATTERNS = [
 DESTRUCTIVE_TOOLS = {
     "delete_path", "uninstall_app", "run_shell",
     "shutdown_windows", "restart_windows", "empty_recycle_bin",
-    "block_camera_access", "kill_process_by_name",
+    "block_camera_access", "kill_process_by_name", "kill_process",
     "save_credential", "get_credential", "delete_credential",
+    "clean_temp_files",
 }
 
-# Banking / money-move intents — never automate PIN entry or transfers
 BANKING_BLOCK_PATTERNS = [
     r"\btransfer money\b", r"\bsend money\b", r"\bbank transfer\b",
     r"\bwire transfer\b", r"\benter (my )?pin\b", r"\baccount (number|no)\b",
@@ -87,6 +91,21 @@ class JagXAgent:
         self.on_tool_end: Optional[Callable[[str, str], None]] = None
         self.confirm_callback: Optional[Callable[[str], bool]] = None
 
+        # Immediately bind whatever model Ollama already has
+        try:
+            from core.setup_ai import ensure_local_ai
+            status = ensure_local_ai(
+                base_url=getattr(self.llm, "base_url", "http://127.0.0.1:11434"),
+                preferred_model=getattr(self.llm, "model", "qwen2.5:3b"),
+                auto_pull=False,  # don't block startup; Fix AI button can pull
+                auto_install_ollama=False,
+            )
+            if status.get("ok") and status.get("model"):
+                self.llm.model = status["model"]
+                self.llm.available_models = status.get("available") or []
+        except Exception:
+            pass
+
         context = self.memory.get_context_summary()
         if context and context != "No long-term memory yet.":
             self.llm.system_prompt += f"\n\n### Personal Memory\n{context}"
@@ -94,35 +113,27 @@ class JagXAgent:
         self.llm.system_prompt += """
 
 ### CRITICAL ACTION RULES
-When the user asks you to DO something on the computer, call tools immediately.
-Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools for websites.
+When the user asks you to DO something, CALL TOOLS immediately. Do not only describe.
+Prefer: open_app, run_shell, move_mouse, click, type_text, find_files, screenshot_and_open, system_briefing.
 
-### PASSWORDS (allowed for personal accounts)
-- You may save website/app passwords using save_credential_interactive (hidden local input).
-- You may check has_credential and help log into the user's OWN social accounts (X, Facebook, etc.).
-- NEVER print, quote, or remember the actual password text in chat.
-- Prefer opening the site and letting the user confirm before filling credentials.
+### PASSWORDS
+Save personal site passwords with save_credential_interactive. Never show secrets in chat.
 
-### HARD LIMITS (must refuse)
-- Do NOT store bank PINs, OTP codes, or card CVV.
-- Do NOT automate money transfers or enter banking PINs for the user.
-- For banking: open the bank site / app and ask the user to enter PIN themselves.
-- Do NOT help hack, steal accounts, or access accounts that are not the user's.
-
-### SOCIAL / WHATSAPP
-- You may open X, Facebook, WhatsApp Web/Desktop and help the user post, like, or reply
-  using UI control tools, with confirmation before posting.
+### HARD LIMITS
+No bank PIN storage, no automated money transfers.
 """
 
         self.tool_functions = {
             **WEB_FUNCS, **SYSTEM_FUNCS, **DESKTOP_FUNCS, **PRIVACY_FUNCS, **EXTRA_FUNCS,
             **CREDENTIAL_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **BROWSER_FUNCS,
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
+            **POWER_FEATURE_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
-            SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS
+            SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
+            POWER_FEATURE_TOOLS
         )
 
         console.print(f"[bold orange1]JagX ready[/bold orange1] — {len(self.tool_definitions)} tools — model: {self.llm.model}")
@@ -168,14 +179,12 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
         if not func:
             return f"Unknown tool: {name}"
 
-        # Never allow credential tools to target banking labels
         if name in {"save_credential", "save_credential_interactive", "get_credential"}:
             account = str(arguments.get("account", "")).lower()
             if any(w in account for w in ("bank", "pin", "otp", "cvv", "card", "wallet", "transfer")):
-                return "Refused: JagX will not store or auto-fill banking PINs, OTPs, or card secrets. Open the bank site and enter those yourself."
+                return "Refused: banking PIN/OTP/card secrets are not stored or auto-filled."
 
         if self._is_high_risk(name, arguments):
-            console.print(f"[yellow]Confirm:[/yellow] {name}")
             if not self._ask_confirm(f"Allow sensitive action {name}?"):
                 return "Action cancelled by user."
 
@@ -185,7 +194,6 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
             except Exception:
                 pass
 
-        # Never log raw passwords
         safe_args = dict(arguments)
         for k in list(safe_args):
             if any(s in k.lower() for s in ("password", "secret", "token", "pin")):
@@ -199,12 +207,11 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
         except Exception as e:
             result = f"Tool execution error: {e}"
 
-        # Sanitize credential tool results before model sees them
         if name in {"get_credential", "request_password", "save_credential"}:
             if result.startswith("SECURE_CREDENTIAL:"):
-                result = "CREDENTIAL_AVAILABLE_LOCALLY (secret not shown to chat)"
+                result = "CREDENTIAL_AVAILABLE_LOCALLY (secret not shown)"
             elif name == "request_password" and not result.startswith("PASSWORD_INPUT_"):
-                result = "PASSWORD_RECEIVED_LOCALLY (secret not shown to chat)"
+                result = "PASSWORD_RECEIVED_LOCALLY (secret not shown)"
 
         if self.on_tool_end:
             try:
@@ -218,18 +225,30 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
         if not user_input:
             return "Tell me what you want me to do."
 
-        # Hard stop for automated banking transfers / PIN handling
         if self._is_banking_request(user_input):
             return (
-                "I can open your bank website or app for you, but I will **not** store your PIN "
-                "or automatically transfer money. That is too dangerous if anything goes wrong.\n\n"
-                "What I can do:\n"
-                "1. Open your bank site/app\n"
-                "2. Wait while you enter PIN yourself\n"
-                "3. Help navigate screens after you are logged in\n\n"
-                "For social logins (X, Facebook) and normal website passwords, I can save them securely "
-                "and help you sign in."
+                "I can open your bank site/app, but I will not store your PIN or auto-transfer money.\n"
+                "Enter the PIN yourself. I can help navigate after you log in."
             )
+
+        # Fast-path common commands so small models still act immediately
+        low = user_input.lower().strip()
+        fast = {
+            "open notepad": ("open_app", {"app_name": "notepad"}),
+            "open calculator": ("open_app", {"app_name": "calculator"}),
+            "open file explorer": ("open_app", {"app_name": "explorer"}),
+            "open explorer": ("open_app", {"app_name": "explorer"}),
+            "take a screenshot": ("screenshot_and_open", {}),
+            "screenshot": ("screenshot_and_open", {}),
+            "system briefing": ("system_briefing", {}),
+            "organize downloads": ("organize_downloads", {}),
+            "clean temp": ("clean_temp_files", {}),
+            "mute": ("volume_mute_toggle", {}),
+        }
+        if low in fast:
+            name, args = fast[low]
+            result = self._execute_tool(name, args)
+            return f"Done. {result}"
 
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
@@ -241,7 +260,6 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
                 tools=self.tool_definitions,
                 tool_choice="auto",
             )
-
             tool_calls = response.get("tool_calls")
             if tool_calls:
                 self.messages.append(response)
@@ -263,8 +281,6 @@ Use desktop tools for mouse/keyboard, system tools for files/apps, browser tools
 
             content = (response.get("content") or "").strip()
             self.messages.append({"role": "assistant", "content": content})
-
-            low = user_input.lower()
             if any(w in low for w in ("remember", "my name is", "i like", "i prefer", "note that")):
                 try:
                     self.memory.add_note(user_input)
