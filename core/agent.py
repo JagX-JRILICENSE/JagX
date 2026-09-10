@@ -73,6 +73,18 @@ try:
     from core.tools.games import GAME_TOOLS, TOOL_FUNCTIONS as GAME_FUNCS
 except Exception:
     GAME_TOOLS, GAME_FUNCS = [], {}
+try:
+    from core.tools.streaming import STREAMING_TOOLS, TOOL_FUNCTIONS as STREAMING_FUNCS
+except Exception:
+    STREAMING_TOOLS, STREAMING_FUNCS = [], {}
+try:
+    from core.tools.web_builder import WEB_BUILDER_TOOLS, TOOL_FUNCTIONS as WEB_BUILDER_FUNCS
+except Exception:
+    WEB_BUILDER_TOOLS, WEB_BUILDER_FUNCS = [], {}
+try:
+    from core.tools.image import IMAGE_TOOLS, TOOL_FUNCTIONS as IMAGE_FUNCS
+except Exception:
+    IMAGE_TOOLS, IMAGE_FUNCS = [], {}
 
 console = Console()
 
@@ -93,7 +105,8 @@ CONFIRM_TOOLS = {
 SHOW_RESULT_TOOLS = {
     "vercel_deploy", "x_click_post_button", "whatsapp_send_message",
     "github_push", "x_compose_post", "facebook_compose_post",
-    "open_any_url", "open_vercel_dashboard",
+    "open_any_url", "open_vercel_dashboard", "generate_image",
+    "build_animated_website",
 }
 
 MONEY_BLOCK_PATTERNS = [
@@ -123,8 +136,7 @@ def _select_tools(all_defs: List[dict], user_text: str, cap: int = 48) -> List[d
     core_names = {
         "open_app", "screenshot_and_open", "system_briefing", "open_any_url",
         "open_x", "open_whatsapp_web", "vercel_deploy", "github_git_status",
-        "add_note", "add_task", "list_tasks",
-        "open_2048", "open_dino_game", "open_steam", "game_press_key", "play_simple_loop",
+        "generate_image", "build_animated_website", "prepare_stream", "open_obs",
     }
     core = [d for d in all_defs if (d.get("function") or {}).get("name") in core_names]
     seen = set()
@@ -186,8 +198,8 @@ class JagXAgent:
         self.llm.system_prompt += """
 
 ### AUTONOMOUS MODE
-Act immediately. Open games, press keys, post, deploy without asking.
-Games: open_steam, open_2048, open_dino_game, game_press_key, play_simple_loop, game_combo.
+Act immediately for: stream setup, image generation, website building, games, posts, deploy.
+Tools include: prepare_stream, open_obs, generate_image, build_animated_website, build_portfolio_site.
 
 ### FORBIDDEN
 No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
@@ -198,14 +210,14 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
             **CREDENTIAL_FUNCS, **MEDIA_FUNCS, **PRODUCTIVITY_FUNCS, **BROWSER_FUNCS,
             **SCREEN_FUNCS, **SYSTEM_PLUS_FUNCS, **SYSTEM_PLUS2_FUNCS, **POWER_FUNCS,
             **POWER_FEATURE_FUNCS, **SOCIAL_WEB_FUNCS, **CLOUD_DEV_FUNCS, **DEVELOPER_FUNCS,
-            **MEGA_FUNCS, **GAME_FUNCS,
+            **MEGA_FUNCS, **GAME_FUNCS, **STREAMING_FUNCS, **WEB_BUILDER_FUNCS, **IMAGE_FUNCS,
         }
         self.tool_definitions = (
             WEB_TOOLS + SYSTEM_TOOLS + DESKTOP_TOOLS + PRIVACY_TOOLS + EXTRA_TOOLS +
             CREDENTIAL_TOOLS + MEDIA_TOOLS + PRODUCTIVITY_TOOLS + BROWSER_TOOLS +
             SCREEN_TOOLS + SYSTEM_PLUS_TOOLS + SYSTEM_PLUS2_TOOLS + POWER_TOOL_DEFINITIONS +
             POWER_FEATURE_TOOLS + SOCIAL_WEB_TOOLS + CLOUD_DEV_TOOLS + DEVELOPER_TOOLS +
-            MEGA_TOOLS + GAME_TOOLS
+            MEGA_TOOLS + GAME_TOOLS + STREAMING_TOOLS + WEB_BUILDER_TOOLS + IMAGE_TOOLS
         )
 
         brain = getattr(self.little, "model_name", "rules") if self.little else "none"
@@ -325,7 +337,7 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
         if self._is_money_block(user_input):
             return (
                 "I will not store card/PIN data, auto-transfer money, or place trades automatically.\n"
-                "I can open the site, improve code, deploy, post, and play games on screen."
+                "I can stream-setup, generate images, build websites, deploy, and post."
             )
 
         low = user_input.lower().strip()
@@ -333,35 +345,41 @@ No bank PIN/card/CVV, no auto money transfer, no auto-trading, no hacking.
         if low.startswith("open ") and slug in self.tool_functions:
             return f"Done. {self._execute_tool(slug, {})}"
 
+        # Image: "generate image of a jaguar"
+        if low.startswith("generate image") or low.startswith("make an image") or low.startswith("draw "):
+            prompt = re.sub(r"^(generate image( of)?|make an image( of)?|draw)\s*", "", low, flags=re.I).strip()
+            if prompt and "generate_image" in self.tool_functions:
+                return f"Done. {self._execute_tool('generate_image', {'prompt': prompt})}"
+
+        # Website shortcuts
+        if "build" in low and "website" in low and "build_animated_website" in self.tool_functions:
+            return f"Done. {self._execute_tool('build_animated_website', {'title': 'JagX Site', 'headline': 'Welcome', 'subtitle': user_input})}"
+
+        # Stream shortcuts
+        if low.startswith("stream on ") or low.startswith("prepare stream"):
+            platform = low.replace("stream on ", "").replace("prepare stream", "twitch").strip() or "twitch"
+            if "prepare_stream" in self.tool_functions:
+                return f"Done. {self._execute_tool('prepare_stream', {'platform': platform})}"
+
         fast = {
             "open notepad": ("open_app", {"app_name": "notepad"}),
             "open calculator": ("open_app", {"app_name": "calculator"}),
-            "open file explorer": ("open_app", {"app_name": "explorer"}),
             "take a screenshot": ("screenshot_and_open", {}),
             "screenshot": ("screenshot_and_open", {}),
             "system briefing": ("system_briefing", {}),
-            "organize downloads": ("organize_downloads", {}),
             "open whatsapp": ("open_whatsapp_web", {}),
             "open x": ("open_x", {}),
-            "open 2048": ("open_2048", {}),
-            "play 2048": ("open_2048", {}),
-            "open dino": ("open_dino_game", {}),
-            "open dino game": ("open_dino_game", {}),
-            "play dino": ("open_dino_game", {}),
-            "open snake": ("open_snake", {}),
+            "open obs": ("open_obs", {}),
             "open steam": ("open_steam", {}),
-            "open chess": ("open_chess", {}),
+            "open 2048": ("open_2048", {}),
         }
         if low in fast:
             name, args = fast[low]
             return f"Done. {self._execute_tool(name, args)}"
 
-        # "press space 10 times" style
         m = re.match(r"press ([a-z0-9]+)(?:\s+(\d+)\s*times?)?", low)
         if m and "game_press_key" in self.tool_functions:
-            key = m.group(1)
-            times = int(m.group(2) or 1)
-            return f"Done. {self._execute_tool('game_press_key', {'key': key, 'times': times})}"
+            return f"Done. {self._execute_tool('game_press_key', {'key': m.group(1), 'times': int(m.group(2) or 1)})}"
 
         self.messages.append({"role": "user", "content": user_input})
         if len(self.messages) > 40:
